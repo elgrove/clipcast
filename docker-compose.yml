@@ -1,0 +1,25 @@
+services:
+  clipcast:
+    image: clipcast:latest
+    ports:
+      - "8906:8906"
+    volumes:
+      - ./data:/data
+      - ./podcasts:/podcasts
+    environment:
+      - DEBUG=False
+      - ALLOWED_HOSTS=*
+    restart: unless-stopped
+  transcription:
+    image: ghcr.io/ggml-org/whisper.cpp:main
+    platform: linux/amd64
+    ports:
+      - "8998:8998"
+    entrypoint: []
+    command: [ "./build/bin/whisper-server", "--host", "0.0.0.0", "--port", "8998", "--model", "/models/ggml-base.en.bin", "--no-gpu", "--convert" ]
+    volumes:
+      - ./transcription/models:/models # pre-built models
+    deploy:
+      resources:
+        limits:
+          cpus: 2

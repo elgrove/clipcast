@@ -1,0 +1,215 @@
+{% extends "base.html" %}
+
+{% block title %}Configuration{% endblock %}
+{% block meta_description %}Configure AI models and settings for Clipcast{% endblock %}
+
+{% block content %}
+<div class="fade-in max-w-3xl mx-auto">
+    <form method="post" action="{% url 'config' %}">
+        {% csrf_token %}
+        
+        <!-- Header with Save Button -->
+        <div class="flex items-end justify-between mb-6 sm:mb-8">
+            <div>
+                <h1 class="text-2xl sm:text-3xl font-bold text-gray-900">Configuration</h1>
+                <p class="mt-1 text-sm text-gray-500">Configure AI models for transcription and analysis</p>
+            </div>
+            <button 
+                type="submit" 
+                class="inline-flex items-center px-4 py-2 bg-gray-900 hover:bg-gray-800 text-white font-medium rounded-lg transition-colors"
+            >
+                <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/>
+                </svg>
+                Save
+            </button>
+        </div>
+        
+        <!-- Settings Section -->
+        <div class="bg-white border border-gray-200 rounded-xl p-5 sm:p-6 mb-6">
+            <h2 class="text-base font-semibold text-gray-900 mb-4">Settings</h2>
+            
+            <div>
+                <label for="gemini_api_key" class="block text-sm font-medium text-gray-700 mb-1.5">
+                    Gemini API Key
+                </label>
+                <input 
+                    type="password" 
+                    id="gemini_api_key" 
+                    name="gemini_api_key" 
+                    value="{{ config.gemini_api_key }}"
+                    placeholder="Enter your Gemini API key"
+                    class="block w-full px-3 py-2.5 bg-gray-50 border border-gray-200 rounded-lg text-gray-900 placeholder-gray-400 focus:border-gray-400 focus:ring-1 focus:ring-gray-400"
+                >
+                <p class="mt-1.5 text-xs text-gray-400">Required for Gemini models (transcription and analysis)</p>
+            </div>
+
+            <div class="mt-4">
+                <label for="whisper_host" class="block text-sm font-medium text-gray-700 mb-1.5">
+                    Whisper.cpp Server Host
+                </label>
+                <input 
+                    type="text" 
+                    id="whisper_host" 
+                    name="whisper_host" 
+                    value="{{ config.transcription_model.host|default:'' }}"
+                    class="block w-full px-3 py-2.5 bg-gray-50 border border-gray-200 rounded-lg text-gray-900 placeholder-gray-400 focus:border-gray-400 focus:ring-1 focus:ring-gray-400"
+                >
+                <p class="mt-1.5 text-xs text-gray-400">Required for Whisper.cpp transcription</p>
+            </div>
+        </div>
+
+        <!-- Model Selection -->
+        <div class="bg-white border border-gray-200 rounded-xl p-5 sm:p-6 mb-6">
+            <h2 class="text-base font-semibold text-gray-900 mb-4">Active Models</h2>
+            
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <!-- Transcription Model -->
+                <div>
+                    <label for="transcription_model" class="block text-sm font-medium text-gray-700 mb-1.5">
+                        Transcription Model
+                    </label>
+                    <select 
+                        id="transcription_model" 
+                        name="transcription_model" 
+                        class="block w-full px-3 py-2.5 bg-gray-50 border border-gray-200 rounded-lg text-gray-900 focus:border-gray-400 focus:ring-1 focus:ring-gray-400"
+                    >
+                        <option value="">-- Not configured --</option>
+                        {% for model in transcription_models %}
+                            <option 
+                                value="{{ model.id }}" 
+                                {% if config.transcription_model and config.transcription_model.id == model.id %}selected{% endif %}
+                            >
+                                {{ model }}{% if model.is_preset %}{% endif %}
+                            </option>
+                        {% endfor %}
+                    </select>
+                    <p class="mt-1.5 text-xs text-gray-400">Gemini or Whisper.cpp models can transcribe audio</p>
+                </div>
+                
+                <!-- Analysis Model -->
+                <div>
+                    <label for="analysis_model" class="block text-sm font-medium text-gray-700 mb-1.5">
+                        Analysis Model
+                    </label>
+                    <select 
+                        id="analysis_model" 
+                        name="analysis_model" 
+                        class="block w-full px-3 py-2.5 bg-gray-50 border border-gray-200 rounded-lg text-gray-900 focus:border-gray-400 focus:ring-1 focus:ring-gray-400"
+                    >
+                        <option value="">-- Not configured --</option>
+                        {% for model in analysis_models %}
+                            <option 
+                                value="{{ model.id }}" 
+                                {% if config.analysis_model and config.analysis_model.id == model.id %}selected{% endif %}
+                            >
+                                {{ model }}{% if model.is_preset %}{% endif %}
+                            </option>
+                        {% endfor %}
+                    </select>
+                    <p class="mt-1.5 text-xs text-gray-400">Only Gemini models can analyse for adverts</p>
+                </div>
+            </div>
+
+
+        </div>
+    </form>
+
+    <!-- Add Custom Model -->
+    <div class="bg-white border border-gray-200 rounded-xl p-5 sm:p-6 mb-6">
+        <h2 class="text-base font-semibold text-gray-900 mb-4">Add Custom Model</h2>
+        <p class="text-sm text-gray-500 mb-4">Add a custom Whisper.cpp server or Gemini model not in the presets.</p>
+        
+        <form method="post" action="{% url 'add_model' %}">
+            {% csrf_token %}
+            
+            <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <div>
+                    <label for="provider" class="block text-xs font-medium text-gray-500 mb-1">Provider</label>
+                    <select 
+                        id="provider" 
+                        name="provider" 
+                        required
+                        class="block w-full px-3 py-2 bg-gray-50 border border-gray-200 rounded-lg text-gray-900 text-sm focus:border-gray-400 focus:ring-1 focus:ring-gray-400"
+                    >
+                        <option value="">Select...</option>
+                        <option value="gemini">Gemini</option>
+                        <option value="whisper.cpp">Whisper.cpp</option>
+                    </select>
+                </div>
+                <div>
+                    <label for="model_name" class="block text-xs font-medium text-gray-500 mb-1">Model Name</label>
+                    <input 
+                        type="text" 
+                        id="model_name" 
+                        name="model_name" 
+                        required
+                        placeholder="e.g., gemini-2.0-pro"
+                        class="block w-full px-3 py-2 bg-gray-50 border border-gray-200 rounded-lg text-gray-900 text-sm placeholder-gray-400 focus:border-gray-400 focus:ring-1 focus:ring-gray-400"
+                    >
+                </div>
+                <div id="host_container" style="display: none;">
+                    <label for="host" class="block text-xs font-medium text-gray-500 mb-1">Host URL</label>
+                    <input 
+                        type="text" 
+                        id="host" 
+                        name="host" 
+                        placeholder="http://localhost:8080"
+                        class="block w-full px-3 py-2 bg-gray-50 border border-gray-200 rounded-lg text-gray-900 text-sm placeholder-gray-400 focus:border-gray-400 focus:ring-1 focus:ring-gray-400"
+                    >
+                </div>
+            </div>
+            <div class="mt-3">
+                <button 
+                    type="submit" 
+                    class="inline-flex items-center px-3 py-1.5 bg-gray-100 hover:bg-gray-200 text-gray-700 text-sm font-medium rounded-lg transition-colors"
+                >
+                    <svg class="w-4 h-4 mr-1.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/>
+                    </svg>
+                    Add Model
+                </button>
+            </div>
+        </form>
+    </div>
+
+    <!-- Navigation -->
+    <div class="flex flex-col sm:flex-row items-center justify-between gap-4">
+        <a href="{% url 'home' %}" class="text-gray-500 hover:text-gray-900 text-sm transition-colors order-2 sm:order-1">
+            ← Back to Home
+        </a>
+        <a href="/admin/" 
+           class="inline-flex items-center px-4 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 text-sm font-medium rounded-lg transition-colors order-1 sm:order-2">
+            <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/>
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/>
+            </svg>
+            Admin Panel
+        </a>
+    </div>
+</div>
+
+<script>
+    document.addEventListener('DOMContentLoaded', function() {
+        // For custom model form
+        const providerSelect = document.getElementById('provider');
+        const hostContainer = document.getElementById('host_container');
+        const hostInput = document.getElementById('host');
+        
+        function updateCustomModelFieldVisibility() {
+            const selectedProvider = providerSelect.value;
+            
+            if (selectedProvider === 'whisper.cpp') {
+                hostContainer.style.display = 'block';
+                hostInput.setAttribute('required', 'required');
+            } else {
+                hostContainer.style.display = 'none';
+                hostInput.removeAttribute('required');
+            }
+        }
+        
+        updateCustomModelFieldVisibility();
+        providerSelect.addEventListener('change', updateCustomModelFieldVisibility);
+    });
+</script>
+{% endblock %}

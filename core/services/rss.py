@@ -1,0 +1,265 @@
+import logging
+from datetime import datetime
+from email.utils import parsedate_to_datetime
+
+import feedparser
+import requests
+from django.conf import settings
+from pydantic import BaseModel
+
+from core.models import PodcastEpisode, PodcastShow
+
+logger = logging.getLogger(__name__)
+
+
+class ITunesPodcast(BaseModel):
+    itunes_id: str
+    title: str
+    artist: str
+    feed_url: str
+    artwork_url: str
+    genre: str
+
+
+class RSSEpisode(BaseModel):
+    guid: str
+    title: str
+    description: str
+    published_at: datetime | None
+    duration: int | None
+    audio_url: str
+
+
+class RSSPodcast(BaseModel):
+    title: str
+    description: str
+    artwork_url: str | None
+    episodes: list[RSSEpisode]
+
+
+def search_itunes(term: str, limit: int = 25) -> list[ITunesPodcast]:
+    response = requests.get(
+        settings.ITUNES_SEARCH_URL,
+        params={
+            "term": term,
+            "media": "podcast",
+            "entity": "podcast",
+            "limit": limit,
+        },
+        timeout=10,
+    )
+    response.raise_for_status()
+    data = response.json()
+
+    results = []
+    for item in data.get("results", []):
+        results.append(
+            ITunesPodcast(
+                itunes_id=str(item.get("collectionId", "")),
+                title=item.get("collectionName", ""),
+                artist=item.get("artistName", ""),
+                feed_url=item.get("feedUrl", ""),
+                artwork_url=item.get("artworkUrl600", item.get("artworkUrl100", "")),
+                genre=item.get("primaryGenreName", ""),
+            )
+        )
+    return results
+
+
+def lookup_itunes(itunes_id: str) -> ITunesPodcast | None:
+    response = requests.get(
+        settings.ITUNES_SEARCH_URL.replace("/search", "/lookup"),
+        params={"id": itunes_id},
+        timeout=10,
+    )
+    response.raise_for_status()
+    data = response.json()
+
+    results = data.get("results", [])
+    if not results:
+        return None
+
+    item = results[0]
+    return ITunesPodcast(
+        itunes_id=str(item.get("collectionId", "")),
+        title=item.get("collectionName", ""),
+        artist=item.get("artistName", ""),
+        feed_url=item.get("feedUrl", ""),
+        artwork_url=item.get("artworkUrl600", item.get("artworkUrl100", "")),
+        genre=item.get("primaryGenreName", ""),
+    )
+
+
+def _parse_duration(duration_str: str | None) -> int | None:
+    if not duration_str:
+        return None
+
+    try:
+        if isinstance(duration_str, int):
+            return duration_str
+
+        if ":" in duration_str:
+            parts = duration_str.split(":")
+            if len(parts) == 3:
+                h, m, s = parts
+                return int(h) * 3600 + int(m) * 60 + int(s)
+            elif len(parts) == 2:
+                m, s = parts
+                return int(m) * 60 + int(s)
+
+        return int(duration_str)
+    except (ValueError, TypeError):
+        return None
+
+
+def _parse_date(date_str: str | None) -> datetime | None:
+    if not date_str:
+        return None
+
+    try:
+        return parsedate_to_datetime(date_str)
+    except (ValueError, TypeError):
+        return None
+
+
+def _get_audio_url(entry: dict) -> str:
+    for link in entry.get("links", []):
+        if link.get("type", "").startswith("audio/"):
+            return link.get("href", "")
+
+    for enclosure in entry.get("enclosures", []):
+        if enclosure.get("type", "").startswith("audio/"):
+            return enclosure.get("href", "")
+
+    return ""
+
+
+def _get_artwork_url(feed_data: dict) -> str | None:
+    """Extract podcast artwork URL from feed.
+
+    Checks multiple possible locations:
+    - feed.image.href (iTunes image)
+    - feed.image.url (standard RSS image)
+    - feed.itunes_image (iTunes specific)
+    """
+    if hasattr(feed_data, "image") and isinstance(feed_data.image, dict):
+        if "href" in feed_data.image:
+            return feed_data.image["href"]
+        if "url" in feed_data.image:
+            return feed_data.image["url"]
+
+    if hasattr(feed_data, "itunes_image"):
+        if isinstance(feed_data.itunes_image, str):
+            return feed_data.itunes_image
+        elif isinstance(feed_data.itunes_image, dict) and "href" in feed_data.itunes_image:
+            return feed_data.itunes_image["href"]
+
+    return None
+
+
+def parse_rss_feed(feed_url: str) -> RSSPodcast:
+    response = requests.get(feed_url, timeout=30)
+    response.raise_for_status()
+    feed = feedparser.parse(response.text)
+
+    episodes = []
+    for entry in feed.entries:
+        duration = entry.get("itunes_duration") or entry.get("duration")
+
+        episodes.append(
+            RSSEpisode(
+                guid=entry.get("id", entry.get("link", "")),
+                title=entry.get("title", ""),
+                description=entry.get("summary", entry.get("description", "")),
+                published_at=_parse_date(entry.get("published")),
+                duration=_parse_duration(duration),
+                audio_url=_get_audio_url(entry),
+            )
+        )
+
+    return RSSPodcast(
+        title=feed.feed.get("title", ""),
+        description=feed.feed.get("description", feed.feed.get("subtitle", "")),
+        artwork_url=_get_artwork_url(feed.feed),
+        episodes=episodes,
+    )
+
+
+def sync_podcast_from_itunes(itunes_id: str) -> PodcastShow:
+    podcast_info = lookup_itunes(itunes_id)
+    if not podcast_info:
+        raise ValueError(f"Podcast not found with iTunes ID: {itunes_id}")
+
+    podcast, _ = PodcastShow.objects.update_or_create(
+        itunes_id=itunes_id,
+        defaults={
+            "title": podcast_info.title,
+            "source_rss_url": podcast_info.feed_url,
+        },
+    )
+
+    return podcast
+
+
+def sync_podcast_show_from_rss(podcast: PodcastShow) -> PodcastShow:
+    if not podcast.source_rss_url:
+        raise ValueError(f"Podcast {podcast.title} has no RSS feed URL")
+
+    logger.info(f"Parsing RSS feed for {podcast.title} from {podcast.source_rss_url}")
+    rss_data = parse_rss_feed(podcast.source_rss_url)
+    logger.debug(f"RSS feed parsed successfully, found {len(rss_data.episodes)} episodes")
+
+    if rss_data.description:
+        logger.debug(f"Updating description for {podcast.title}")
+        podcast.description = rss_data.description
+        podcast.save(update_fields=["description"])
+
+    if rss_data.artwork_url and not podcast.image_path.exists():
+        logger.info(f"Downloading artwork for {podcast.title} from {rss_data.artwork_url}")
+        try:
+            response = requests.get(rss_data.artwork_url, timeout=30)
+            response.raise_for_status()
+            podcast.image_path.parent.mkdir(parents=True, exist_ok=True)
+            podcast.image_path.write_bytes(response.content)
+            logger.info(f"Artwork downloaded successfully for {podcast.title}")
+        except Exception as e:
+            logger.warning(
+                f"Failed to download artwork for {podcast.title} from {rss_data.artwork_url}: {e}"
+            )
+    elif podcast.image_path.exists():
+        logger.debug(f"Artwork already exists for {podcast.title}, skipping download")
+
+    return podcast
+
+
+def sync_podcast_episodes_from_rss(
+    podcast: PodcastShow, max_episodes: int = None
+) -> list[PodcastEpisode]:
+    if not podcast.source_rss_url:
+        raise ValueError(f"Podcast {podcast.title} has no RSS feed URL")
+
+    rss_data = parse_rss_feed(podcast.source_rss_url)
+
+    episodes_to_sync = rss_data.episodes
+    if max_episodes:
+        episodes_to_sync = episodes_to_sync[:max_episodes]
+
+    synced = []
+    for ep in episodes_to_sync:
+        if not ep.guid or not ep.audio_url:
+            continue
+
+        episode, _ = PodcastEpisode.objects.update_or_create(
+            podcast=podcast,
+            guid=ep.guid,
+            defaults={
+                "title": ep.title,
+                "description": ep.description,
+                "published_at": ep.published_at,
+                "duration": ep.duration,
+                "source_audio_url": ep.audio_url,
+            },
+        )
+        synced.append(episode)
+
+    return synced
