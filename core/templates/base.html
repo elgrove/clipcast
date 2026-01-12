@@ -227,13 +227,13 @@
             const lightIcon = document.getElementById('theme-icon-light');
             const darkIcon = document.getElementById('theme-icon-dark');
             const autoIcon = document.getElementById('theme-icon-auto');
-            
+
             if (!lightIcon || !darkIcon || !autoIcon) return;
-            
+
             lightIcon.classList.add('hidden');
             darkIcon.classList.add('hidden');
             autoIcon.classList.add('hidden');
-            
+
             if (theme === 'light') {
                 lightIcon.classList.remove('hidden');
             } else if (theme === 'dark') {
@@ -242,7 +242,7 @@
                 autoIcon.classList.remove('hidden');
             }
         }
-        
+
         function applyTheme(theme) {
             const html = document.documentElement;
             html.setAttribute('data-theme', theme);
@@ -259,7 +259,7 @@
             } else {
                 html.classList.remove('dark');
             }
-            
+
             updateThemeIcon(theme);
         }
         
