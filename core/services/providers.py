@@ -19,7 +19,7 @@ from core.models import (
 )
 from core.services.prompts import ANALYSE_ADVERTS_PROMPT, TRANSCRIBE_AUDIO_PROMPT
 
-TRANSCRIPTION_TIMEOUT = 1200  # 20 minutes
+TRANSCRIPTION_TIMEOUT = 7200  # 2 hours
 ANALYSIS_TIMEOUT = 300  # 5 minutes
 
 

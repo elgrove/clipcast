@@ -15,7 +15,7 @@ Clipcast is a podcast server that uses AI to clip the adverts out of your favour
 - Python/Django web app
 - SQLite database
 - DjangoQ2 for background tasks, backed by SQLite
-- HTMX for minimal web interactivity
+- Tailwind CSS and HTMX in the front end 
 - Deployed with Docker Compose
 
 ## Getting started

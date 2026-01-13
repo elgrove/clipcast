@@ -8,22 +8,22 @@
 <div class="fade-in">
     <!-- Breadcrumb -->
     <nav class="mb-6">
-        <ol class="flex items-center space-x-2 text-sm text-gray-400">
-            <li><a href="{% url 'home' %}" class="hover:text-gray-900 transition-colors">Podcasts</a></li>
+        <ol class="flex items-center space-x-2 text-sm text-gray-400 dark:text-gray-500">
+            <li><a href="{% url 'home' %}" class="hover:text-gray-900 dark:hover:text-gray-100 transition-colors">Podcasts</a></li>
             <li><svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg></li>
-            <li class="text-gray-900 truncate max-w-[200px] sm:max-w-none">{{ podcast.title|truncatewords:5 }}</li>
+            <li class="text-gray-900 dark:text-gray-100 truncate max-w-[200px] sm:max-w-none">{{ podcast.title|truncatewords:5 }}</li>
         </ol>
     </nav>
 
     <!-- Podcast Header -->
-    <div class="bg-white border border-gray-200 rounded-xl p-5 sm:p-6 mb-6">
+    <div class="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl p-5 sm:p-6 mb-6">
         <div class="flex flex-col sm:flex-row items-center sm:items-start gap-5">
             <!-- Podcast Cover -->
-            <div class="w-24 h-24 sm:w-28 sm:h-28 bg-gray-200 rounded-xl overflow-hidden flex-shrink-0">
+            <div class="w-24 h-24 sm:w-28 sm:h-28 bg-gray-200 dark:bg-gray-700 rounded-xl overflow-hidden flex-shrink-0">
                 {% if podcast.image_path.exists %}
                 <img src="{% url 'podcast_image' podcast.id %}" alt="{{ podcast.title }}" class="w-full h-full object-cover">
                 {% else %}
-                <div class="w-full h-full bg-gray-900 flex items-center justify-center">
+                <div class="w-full h-full bg-gray-900 dark:bg-gray-800 flex items-center justify-center">
                     <svg class="w-12 h-12 sm:w-14 sm:h-14 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z"/>
                     </svg>
@@ -33,21 +33,21 @@
             
             <!-- Podcast Info -->
             <div class="flex-1 min-w-0 text-center sm:text-left">
-                <h1 class="text-xl sm:text-2xl font-bold text-gray-900 mb-2">{{ podcast.title }}</h1>
+                <h1 class="text-xl sm:text-2xl font-bold text-gray-900 dark:text-gray-100 mb-2">{{ podcast.title }}</h1>
                 {% if podcast.description %}
-                <p class="text-gray-500 text-sm line-clamp-3 max-w-2xl">{{ podcast.description|striptags|truncatewords:40 }}</p>
+                <p class="text-gray-500 dark:text-gray-400 text-sm line-clamp-3 max-w-2xl">{{ podcast.description|striptags|truncatewords:40 }}</p>
                 {% endif %}
             </div>
         </div>
         
         <!-- Podcast Actions -->
-        <div class="mt-6 pt-5 border-t border-gray-100">
+        <div class="mt-6 pt-5 border-t border-gray-100 dark:border-gray-700">
             <div class="flex flex-wrap items-center gap-2">
                 <!-- Has Ads Toggle -->
                 <form action="{% url 'toggle_podcast_ads' podcast.id %}" method="post" class="inline">
                     {% csrf_token %}
                     <button type="submit"
-                            class="inline-flex items-center px-3 py-1.5 {% if podcast.has_ads %}bg-gray-900 text-white hover:bg-gray-800{% else %}bg-white hover:bg-gray-50 text-gray-600 hover:text-gray-900 border border-gray-200{% endif %} text-sm font-medium rounded-lg transition-colors"
+                            class="inline-flex items-center px-3 py-1.5 {% if podcast.has_ads %}bg-gray-900 dark:bg-gray-700 text-white hover:bg-gray-800 dark:hover:bg-gray-600{% else %}bg-white dark:bg-gray-700 hover:bg-gray-50 dark:hover:bg-gray-600 text-gray-600 dark:text-gray-200 hover:text-gray-900 dark:hover:text-gray-100 border border-gray-200 dark:border-gray-600{% endif %} text-sm font-medium rounded-lg transition-colors"
                             title="{% if podcast.has_ads %}Mark as ad-free{% else %}Mark as having ads{% endif %}">
                         <svg class="w-4 h-4 sm:mr-1.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14.121 14.121L19 19m-7-7l7-7m-7 7l-2.879 2.879M12 12L9.121 9.121m0 5.758a3 3 0 10-4.243 4.243 3 3 0 004.243-4.243zm0-5.758a3 3 0 10-4.243-4.243 3 3 0 004.243 4.243z"/>
@@ -56,14 +56,14 @@
                     </button>
                 </form>
                 
-                <div class="hidden sm:block h-5 w-px bg-gray-200"></div>
+                <div class="hidden sm:block h-5 w-px bg-gray-200 dark:bg-gray-600"></div>
                 
                 <!-- Delete Podcast -->
                 <form action="{% url 'delete_podcast' podcast.id %}" method="post" class="inline"
                       onsubmit="return confirm('Delete this podcast from your library? Files will be kept.')">
                     {% csrf_token %}
                     <button type="submit"
-                            class="inline-flex items-center px-3 py-1.5 bg-white hover:bg-gray-50 text-gray-600 hover:text-gray-900 text-sm font-medium rounded-lg border border-gray-200 transition-colors">
+                            class="inline-flex items-center px-3 py-1.5 bg-white dark:bg-gray-700 hover:bg-gray-50 dark:hover:bg-gray-600 text-gray-600 dark:text-gray-200 hover:text-gray-900 dark:hover:text-gray-100 text-sm font-medium rounded-lg border border-gray-200 dark:border-gray-600 transition-colors">
                         <svg class="w-4 h-4 sm:mr-1.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/>
                         </svg>
@@ -76,7 +76,7 @@
                       onsubmit="return confirm('Delete this podcast AND all downloaded files? This cannot be undone.')">
                     {% csrf_token %}
                     <button type="submit"
-                            class="inline-flex items-center px-3 py-1.5 bg-white hover:bg-gray-50 text-gray-600 hover:text-gray-900 text-sm font-medium rounded-lg border border-gray-200 transition-colors">
+                            class="inline-flex items-center px-3 py-1.5 bg-white dark:bg-gray-700 hover:bg-gray-50 dark:hover:bg-gray-600 text-gray-600 dark:text-gray-200 hover:text-gray-900 dark:hover:text-gray-100 text-sm font-medium rounded-lg border border-gray-200 dark:border-gray-600 transition-colors">
                         <svg class="w-4 h-4 sm:mr-1.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/>
                         </svg>
@@ -84,11 +84,11 @@
                     </button>
                 </form>
                 
-                <div class="hidden sm:block h-5 w-px bg-gray-200"></div>
+                <div class="hidden sm:block h-5 w-px bg-gray-200 dark:bg-gray-600"></div>
                 
                 <!-- Go to RSS Feed -->
                 <a href="{% url 'podcast_feed' podcast.itunes_id %}" target="_blank" rel="noopener noreferrer"
-                   class="inline-flex items-center px-3 py-1.5 bg-white hover:bg-gray-50 text-gray-600 hover:text-gray-900 text-sm font-medium rounded-lg border border-gray-200 transition-colors">
+                   class="inline-flex items-center px-3 py-1.5 bg-white dark:bg-gray-700 hover:bg-gray-50 dark:hover:bg-gray-600 text-gray-600 dark:text-gray-200 hover:text-gray-900 dark:hover:text-gray-100 text-sm font-medium rounded-lg border border-gray-200 dark:border-gray-600 transition-colors">
                     <svg class="w-4 h-4 sm:mr-1.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 5c7.18 0 13 5.82 13 13M6 11a7 7 0 017 7m-6 0a1 1 0 11-2 0 1 1 0 012 0z"/>
                     </svg>
@@ -99,7 +99,7 @@
                 <form action="{% url 'queue_sync_podcast_show' podcast.id %}" method="post" class="inline">
                     {% csrf_token %}
                     <button type="submit"
-                            class="inline-flex items-center px-3 py-1.5 bg-white hover:bg-gray-50 text-gray-600 hover:text-gray-900 text-sm font-medium rounded-lg border border-gray-200 transition-colors"
+                            class="inline-flex items-center px-3 py-1.5 bg-white dark:bg-gray-700 hover:bg-gray-50 dark:hover:bg-gray-600 text-gray-600 dark:text-gray-200 hover:text-gray-900 dark:hover:text-gray-100 text-sm font-medium rounded-lg border border-gray-200 dark:border-gray-600 transition-colors"
                             title="Sync podcast metadata from RSS feed">
                         <svg class="w-4 h-4 sm:mr-1.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
@@ -112,7 +112,7 @@
                 <form action="{% url 'queue_sync_podcast_episodes' podcast.id %}" method="post" class="inline">
                     {% csrf_token %}
                     <button type="submit"
-                            class="inline-flex items-center px-3 py-1.5 bg-white hover:bg-gray-50 text-gray-600 hover:text-gray-900 text-sm font-medium rounded-lg border border-gray-200 transition-colors"
+                            class="inline-flex items-center px-3 py-1.5 bg-white dark:bg-gray-700 hover:bg-gray-50 dark:hover:bg-gray-600 text-gray-600 dark:text-gray-200 hover:text-gray-900 dark:hover:text-gray-100 text-sm font-medium rounded-lg border border-gray-200 dark:border-gray-600 transition-colors"
                             title="Sync episodes from RSS feed">
                         <svg class="w-4 h-4 sm:mr-1.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
@@ -123,7 +123,7 @@
                 
                 <!-- Clip All Episodes -->
                 <button type="button"
-                        class="inline-flex items-center px-3 py-1.5 bg-gray-50 text-gray-400 text-sm font-medium rounded-lg border border-gray-200 cursor-not-allowed"
+                        class="inline-flex items-center px-3 py-1.5 bg-gray-50 dark:bg-gray-800 text-gray-400 dark:text-gray-500 text-sm font-medium rounded-lg border border-gray-200 dark:border-gray-700 cursor-not-allowed"
                         disabled
                         title="Coming soon">
                     <svg class="w-4 h-4 sm:mr-1.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -137,25 +137,25 @@
 
     <!-- Episodes Section -->
     <div class="flex items-center justify-between mb-4">
-        <h2 class="text-lg font-semibold text-gray-900">Episodes</h2>
+        <h2 class="text-lg font-semibold text-gray-900 dark:text-gray-100">Episodes</h2>
         {% if episodes %}
-        <span class="text-sm text-gray-400">{{ episodes.paginator.count }} total</span>
+        <span class="text-sm text-gray-400 dark:text-gray-500">{{ episodes.paginator.count }} total</span>
         {% endif %}
     </div>
 
     {% if episodes %}
     <div class="space-y-3">
         {% for episode in episodes %}
-        <div class="group bg-white border border-gray-200 rounded-xl p-4 hover:border-gray-300 transition-colors">
+        <div class="group bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl p-4 hover:border-gray-300 dark:hover:border-gray-600 transition-colors">
             <div class="flex flex-col lg:flex-row lg:items-start gap-3 lg:gap-4">
                 <!-- Episode Info -->
                 <div class="flex-1 min-w-0">
-                    <h3 class="font-medium text-gray-900 group-hover:text-gray-700 transition-colors mb-1">
+                    <h3 class="font-medium text-gray-900 dark:text-gray-100 group-hover:text-gray-700 dark:group-hover:text-gray-300 transition-colors mb-1">
                         {{ episode.title }}
                     </h3>
                     
                     <!-- Episode Meta -->
-                    <div class="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-gray-400 mb-2">
+                    <div class="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-gray-400 dark:text-gray-500 mb-2">
                         {% if episode.published_at %}
                         <span class="flex items-center">
                             <svg class="w-3.5 h-3.5 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -177,19 +177,19 @@
                     <!-- Status Badges -->
                     <div class="flex flex-wrap items-center gap-1.5">
                         {% if episode.is_downloaded %}
-                        <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-600">
+                        <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300">
                             Downloaded
                         </span>
                         {% endif %}
                         
                         {% if episode.transcription %}
-                        <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-600">
+                        <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300">
                             Transcribed
                         </span>
                         {% endif %}
                         
                         {% if episode.ads %}
-                        <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-600">
+                        <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300">
                             {{ episode.ads|length }} ad{{ episode.ads|length|pluralize }}
                         </span>
                         {% endif %}
@@ -197,9 +197,9 @@
                         {% with latest_report=episode.clipping_reports.first %}
                         {% if latest_report %}
                         <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium
-                            {% if latest_report.status.value == 'completed' %}bg-gray-900 text-white
-                            {% elif latest_report.exceptions %}bg-gray-200 text-gray-700
-                            {% else %}bg-gray-100 text-gray-600{% endif %}">
+                            {% if latest_report.status.value == 'completed' %}bg-gray-900 dark:bg-gray-700 text-white dark:text-gray-100
+                            {% elif latest_report.exceptions %}bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300
+                            {% else %}bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300{% endif %}">
                             {{ latest_report.status.value|title }}
                         </span>
                         {% endif %}
@@ -213,7 +213,7 @@
                     <form action="{% url 'queue_download_episode' episode.id %}" method="post" class="inline">
                         {% csrf_token %}
                         <button type="submit"
-                                class="inline-flex items-center px-3 py-1.5 bg-white hover:bg-gray-50 text-gray-600 text-sm font-medium rounded-lg border border-gray-200 transition-colors {% if episode.is_downloaded %}opacity-50{% endif %}"
+                                class="inline-flex items-center px-3 py-1.5 bg-white dark:bg-gray-700 hover:bg-gray-50 dark:hover:bg-gray-600 text-gray-600 dark:text-gray-200 text-sm font-medium rounded-lg border border-gray-200 dark:border-gray-600 transition-colors {% if episode.is_downloaded %}opacity-50{% endif %}"
                                 {% if episode.is_downloaded %}title="Already downloaded"{% else %}title="Download"{% endif %}>
                             <svg class="w-4 h-4 sm:mr-1.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/>
@@ -226,7 +226,7 @@
                     <form action="{% url 'queue_clip_episode' episode.id %}" method="post" class="inline">
                         {% csrf_token %}
                         <button type="submit"
-                                class="inline-flex items-center px-3 sm:px-4 py-1.5 bg-gray-900 hover:bg-gray-800 text-white text-sm font-medium rounded-lg transition-colors"
+                                class="inline-flex items-center px-3 sm:px-4 py-1.5 bg-gray-900 dark:bg-gray-700 hover:bg-gray-800 dark:hover:bg-gray-600 text-white text-sm font-medium rounded-lg transition-colors"
                                 title="Remove ads">
                             <svg class="w-4 h-4 sm:mr-1.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14.121 14.121L19 19m-7-7l7-7m-7 7l-2.879 2.879M12 12L9.121 9.121m0 5.758a3 3 0 10-4.243 4.243 3 3 0 004.243-4.243zm0-5.758a3 3 0 10-4.243-4.243 3 3 0 004.243 4.243z"/>
@@ -242,17 +242,17 @@
     
     <!-- Pagination -->
     {% if episodes.has_other_pages %}
-    <div class="mt-6 flex flex-col sm:flex-row items-center justify-between gap-4 pt-6 border-t border-gray-200">
-        <p class="text-sm text-gray-500 order-2 sm:order-1">
-            Showing <span class="font-medium text-gray-900">{{ episodes.start_index }}</span>
-            to <span class="font-medium text-gray-900">{{ episodes.end_index }}</span>
-            of <span class="font-medium text-gray-900">{{ episodes.paginator.count }}</span>
+    <div class="mt-6 flex flex-col sm:flex-row items-center justify-between gap-4 pt-6 border-t border-gray-200 dark:border-gray-700">
+        <p class="text-sm text-gray-500 dark:text-gray-400 order-2 sm:order-1">
+            Showing <span class="font-medium text-gray-900 dark:text-gray-100">{{ episodes.start_index }}</span>
+            to <span class="font-medium text-gray-900 dark:text-gray-100">{{ episodes.end_index }}</span>
+            of <span class="font-medium text-gray-900 dark:text-gray-100">{{ episodes.paginator.count }}</span>
         </p>
         
         <nav class="flex items-center gap-1 order-1 sm:order-2">
             {% if episodes.has_previous %}
             <a href="?page={{ episodes.previous_page_number }}" 
-               class="inline-flex items-center px-3 py-1.5 text-sm font-medium text-gray-600 bg-white border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors">
+               class="inline-flex items-center px-3 py-1.5 text-sm font-medium text-gray-600 dark:text-gray-300 bg-white dark:bg-gray-700 border border-gray-200 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-600 transition-colors">
                 <svg class="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"/>
                 </svg>
@@ -260,13 +260,13 @@
             </a>
             {% endif %}
             
-            <span class="px-3 py-1.5 text-sm text-gray-500">
+            <span class="px-3 py-1.5 text-sm text-gray-500 dark:text-gray-400">
                 {{ episodes.number }} / {{ episodes.paginator.num_pages }}
             </span>
             
             {% if episodes.has_next %}
             <a href="?page={{ episodes.next_page_number }}" 
-               class="inline-flex items-center px-3 py-1.5 text-sm font-medium text-gray-600 bg-white border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors">
+               class="inline-flex items-center px-3 py-1.5 text-sm font-medium text-gray-600 dark:text-gray-300 bg-white dark:bg-gray-700 border border-gray-200 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-600 transition-colors">
                 Next
                 <svg class="w-4 h-4 ml-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/>
@@ -279,12 +279,12 @@
     
     {% else %}
     <!-- Empty State -->
-    <div class="text-center py-12 sm:py-16 bg-white border border-gray-200 rounded-xl">
-        <svg class="w-12 h-12 sm:w-16 sm:h-16 mx-auto text-gray-200 mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+    <div class="text-center py-12 sm:py-16 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl">
+        <svg class="w-12 h-12 sm:w-16 sm:h-16 mx-auto text-gray-200 dark:text-gray-600 mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"/>
         </svg>
-        <h3 class="text-lg font-medium text-gray-900 mb-1">No episodes yet</h3>
-        <p class="text-gray-400">Episodes will appear here once fetched from the RSS feed</p>
+        <h3 class="text-lg font-medium text-gray-900 dark:text-gray-100 mb-1">No episodes yet</h3>
+        <p class="text-gray-400 dark:text-gray-500">Episodes will appear here once fetched from the RSS feed</p>
     </div>
     {% endif %}
 </div>
