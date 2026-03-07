@@ -7,6 +7,7 @@ from django.contrib import messages
 from django.core.paginator import Paginator
 from django.http import FileResponse, Http404, HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
+from django.urls import reverse
 from django_q.tasks import async_task
 
 from core.models import (
@@ -48,7 +49,7 @@ def podcast_detail(request, podcast_id):
     podcast = get_object_or_404(PodcastShow, id=podcast_id)
     episodes_list = podcast.episodes.all().order_by("-published_at")
 
-    paginator = Paginator(episodes_list, 10)
+    paginator = Paginator(episodes_list, 50)
     page_number = request.GET.get("page", 1)
     episodes = paginator.get_page(page_number)
 
@@ -256,7 +257,9 @@ def queue_download_episode(request, episode_id):
     )
 
     messages.success(request, f"Queued '{episode.title}' for download")
-    return redirect("podcast_detail", podcast_id=episode.podcast.id)
+    page = request.POST.get("page", "1")
+    url = reverse("podcast_detail", args=[episode.podcast.id])
+    return redirect(f"{url}?page={page}")
 
 
 def queue_clip_episode(request, episode_id):
@@ -269,7 +272,9 @@ def queue_clip_episode(request, episode_id):
     queue_episode_for_clipping(episode, run_async=not is_sync_mode)
 
     messages.success(request, f"Queued '{episode.title}' for ad removal")
-    return redirect("podcast_detail", podcast_id=episode.podcast.id)
+    page = request.POST.get("page", "1")
+    url = reverse("podcast_detail", args=[episode.podcast.id])
+    return redirect(f"{url}?page={page}")
 
 
 def queue_sync_podcast_show(request, podcast_id):

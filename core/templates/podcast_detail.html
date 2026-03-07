@@ -212,6 +212,7 @@
                     <!-- Download Button -->
                     <form action="{% url 'queue_download_episode' episode.id %}" method="post" class="inline">
                         {% csrf_token %}
+                        <input type="hidden" name="page" value="{{ episodes.number }}">
                         <button type="submit"
                                 class="inline-flex items-center px-3 py-1.5 bg-white dark:bg-gray-700 hover:bg-gray-50 dark:hover:bg-gray-600 text-gray-600 dark:text-gray-200 text-sm font-medium rounded-lg border border-gray-200 dark:border-gray-600 transition-colors {% if episode.is_downloaded %}opacity-50{% endif %}"
                                 {% if episode.is_downloaded %}title="Already downloaded"{% else %}title="Download"{% endif %}>
@@ -225,6 +226,7 @@
                     <!-- Clip Button -->
                     <form action="{% url 'queue_clip_episode' episode.id %}" method="post" class="inline">
                         {% csrf_token %}
+                        <input type="hidden" name="page" value="{{ episodes.number }}">
                         <button type="submit"
                                 class="inline-flex items-center px-3 sm:px-4 py-1.5 bg-gray-900 dark:bg-gray-700 hover:bg-gray-800 dark:hover:bg-gray-600 text-white text-sm font-medium rounded-lg transition-colors"
                                 title="Remove ads">
