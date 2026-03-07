@@ -39,6 +39,7 @@ urlpatterns = [
     path("episode/<uuid:episode_id>/clip/", views.queue_clip_episode, name="queue_clip_episode"),
     path("config/", views.config, name="config"),
     path("config/add-model/", views.add_model, name="add_model"),
+    path("config/export-opml/", views.export_opml, name="export_opml"),
     path("feed/<str:itunes_id>/", views.podcast_feed, name="podcast_feed"),
     path(
         "podcast/<uuid:podcast_id>/episode/<uuid:episode_id>/audio/",

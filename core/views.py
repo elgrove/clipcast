@@ -171,6 +171,8 @@ def config(request):
         messages.success(request, "Configuration saved successfully")
         return redirect("config")
 
+    podcasts = PodcastShow.objects.all().order_by("title")
+
     return render(
         request,
         "config.html",
@@ -178,6 +180,7 @@ def config(request):
             "config": config_instance,
             "transcription_models": transcription_models,
             "analysis_models": analysis_models,
+            "podcasts": podcasts,
         },
     )
 
@@ -337,6 +340,52 @@ def podcast_feed(request, itunes_id):
     feed_xml = generate_podcast_feed(podcast, request)
 
     return HttpResponse(feed_xml, content_type="application/rss+xml; charset=utf-8")
+
+
+def export_opml(request):
+    if request.method != "POST":
+        return redirect("config")
+
+    podcast_ids = request.POST.getlist("podcast_ids")
+    feed_type = request.POST.get("feed_type", "clipcast")
+
+    if not podcast_ids:
+        messages.warning(request, "No podcasts selected for export")
+        return redirect("config")
+
+    podcasts = PodcastShow.objects.filter(id__in=podcast_ids)
+
+    opml_lines = [
+        '<?xml version="1.0" encoding="UTF-8"?>',
+        '<opml version="2.0">',
+        "<head>",
+        "<title>Clipcast Podcast Export</title>",
+        "</head>",
+        "<body>",
+    ]
+
+    for podcast in podcasts:
+        if feed_type == "clipcast":
+            feed_url = request.build_absolute_uri(
+                reverse("podcast_feed", args=[podcast.itunes_id])
+            )
+        else:
+            feed_url = podcast.source_rss_url
+
+        from xml.sax.saxutils import quoteattr
+
+        opml_lines.append(
+            f"    <outline text={quoteattr(podcast.title)} "
+            f"type=\"rss\" xmlUrl={quoteattr(feed_url)} />"
+        )
+
+    opml_lines.append("</body>")
+    opml_lines.append("</opml>")
+
+    content = "\n".join(opml_lines)
+    response = HttpResponse(content, content_type="text/x-opml; charset=utf-8")
+    response["Content-Disposition"] = 'attachment; filename="clipcast.opml"'
+    return response
 
 
 def toggle_podcast_ads(request, podcast_id):
