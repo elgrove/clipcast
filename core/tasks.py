@@ -98,14 +98,18 @@ def sync_and_process_new_episodes() -> dict[str, int]:
                         run_async=not settings.Q_CLUSTER.get("sync", False),
                     )
                 elif episode.mp3_path.exists() and not episode.raw_path.exists():
-                    incomplete_count += 1
-                    logger.info(f"Re-clipping incomplete episode: {episode.title}")
-                    queue_episode_for_clipping(
-                        episode,
-                        task_name_prefix="Clip (Retry)",
-                        initial_log=f"Resuming incomplete clipping for: {episode.title}",
-                        run_async=not settings.Q_CLUSTER.get("sync", False),
-                    )
+                    has_pending = ClippingReport.objects.filter(
+                        episode=episode, edited_at__isnull=True, exceptions=[]
+                    ).exists()
+                    if not has_pending:
+                        incomplete_count += 1
+                        logger.info(f"Re-clipping incomplete episode: {episode.title}")
+                        queue_episode_for_clipping(
+                            episode,
+                            task_name_prefix="Clip (Retry)",
+                            initial_log=f"Resuming incomplete clipping for: {episode.title}",
+                            run_async=not settings.Q_CLUSTER.get("sync", False),
+                        )
 
             results[str(podcast.id)] = new_count
             log_parts = [f"found {new_count} new episodes"]
