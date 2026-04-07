@@ -1,0 +1,77 @@
+[project]
+name = "clipcast"
+version = "2.0.0"
+description = "Self-hosted podcast server with AI-powered advert removal"
+readme = "../README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "fastapi>=0.115.0",
+    "uvicorn[standard]>=0.34.0",
+    "sqlmodel>=0.0.22",
+    "alembic>=1.14.0",
+    "celery[redis]>=5.4.0",
+    "pydantic-settings>=2.7.0",
+    "google-genai>=1.0.0",
+    "feedgen>=1.0.0",
+    "feedparser>=6.0.12",
+    "pydub>=0.25.1",
+    "requests>=2.32.5",
+    "srt>=3.5.0",
+    "httpx>=0.28.0",
+    "python-multipart>=0.0.18",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.0.2",
+    "pytest-asyncio>=0.25.0",
+    "pytest-mock>=3.15.1",
+    "responses>=0.25.8",
+    "ruff>=0.14.10",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+exclude = [
+    ".git",
+    ".ruff_cache",
+    ".venv",
+    "__pycache__",
+    "migrations",
+]
+
+[tool.ruff.lint]
+select = [
+    "E",
+    "W",
+    "F",
+    "I",
+    "N",
+    "UP",
+    "B",
+    "C4",
+    "T20",
+    "SIM",
+    "PIE",
+    "RUF",
+]
+ignore = [
+    "E501",
+    "RUF012",
+    "RUF013",
+]
+fixable = ["ALL"]
+
+[tool.ruff.lint.per-file-ignores]
+"app/routers/*.py" = ["B008"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["app"]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
