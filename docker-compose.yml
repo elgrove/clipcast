@@ -94,13 +94,13 @@ services:
       ./build/bin/whisper-server
       --host 0.0.0.0 --port 8998
       --model /models/ggml-base.en.bin
-      --no-gpu --convert
+      --no-gpu --convert --threads 4
     volumes:
       - ./transcription/models:/models
     deploy:
       resources:
         limits:
-          cpus: "2"
+          cpus: "4"
     restart: unless-stopped
 
 volumes:
