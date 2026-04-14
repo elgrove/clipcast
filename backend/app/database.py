@@ -16,6 +16,7 @@ engine = create_engine(
 
 
 def init_db() -> None:
+    import app.models  # noqa: F401 — ensure all models are registered
     SQLModel.metadata.create_all(engine)
     with engine.connect() as conn:
         conn.exec_driver_sql("PRAGMA journal_mode=WAL")
@@ -27,7 +28,15 @@ def init_db() -> None:
 
 def _run_migrations() -> None:
     with engine.connect() as conn:
-        # Add stored_filename column if it doesn't exist
+        # Skip migrations if tables were just created (fresh install)
+        tables = [
+            row[0] for row in conn.exec_driver_sql(
+                "SELECT name FROM sqlite_master WHERE type='table'"
+            ).fetchall()
+        ]
+        if "podcast_episodes" not in tables:
+            return
+
         ep_columns = [
             row[1] for row in conn.exec_driver_sql("PRAGMA table_info(podcast_episodes)").fetchall()
         ]
