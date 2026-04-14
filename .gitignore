@@ -17,5 +17,10 @@ _project
 project.md
 _podcasts
 data/
+podcasts/
+transcription/
+frontend/.svelte-kit/
+frontend/build/
+frontend/node_modules/
 AGENTS.md
 _django_secret_key.txt

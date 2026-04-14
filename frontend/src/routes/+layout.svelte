@@ -1,22 +1,12 @@
 <script lang="ts">
 	import '../app.css';
-	import { toasts, theme } from '$lib/stores';
+	import { toasts } from '$lib/stores';
 	import type { Snippet } from 'svelte';
 
 	let { children }: { children: Snippet } = $props();
 
 	let mobileMenuOpen = $state(false);
 	let adminDropdownOpen = $state(false);
-	let currentTheme = $state('dark');
-
-	theme.subscribe((v) => (currentTheme = v));
-
-	const themeIcon = $derived(
-		currentTheme === 'dark' ? '🌙' : currentTheme === 'light' ? '☀️' : '🖥️'
-	);
-	const themeLabel = $derived(
-		currentTheme === 'dark' ? 'Dark' : currentTheme === 'light' ? 'Light' : 'Auto'
-	);
 
 	let toastList: { id: number; type: string; message: string }[] = $state([]);
 	toasts.subscribe((v) => (toastList = v));
@@ -75,40 +65,26 @@
 							<a
 								href="/admin/config"
 								onclick={closeAdminDropdown}
-								class="block px-4 py-2 text-sm text-zinc-700 hover:bg-zinc-100 dark:text-zinc-300 dark:hover:bg-zinc-700"
+								class="block px-4 py-2.5 text-sm text-zinc-700 hover:bg-zinc-100 dark:text-zinc-300 dark:hover:bg-zinc-700"
 							>
 								Config
 							</a>
 							<a
 								href="/admin/reports"
 								onclick={closeAdminDropdown}
-								class="block px-4 py-2 text-sm text-zinc-700 hover:bg-zinc-100 dark:text-zinc-300 dark:hover:bg-zinc-700"
+								class="block px-4 py-2.5 text-sm text-zinc-700 hover:bg-zinc-100 dark:text-zinc-300 dark:hover:bg-zinc-700"
 							>
 								Reports
 							</a>
 						</div>
 					{/if}
 				</div>
-
-				<button
-					onclick={() => theme.cycle()}
-					class="ml-2 rounded-lg px-3 py-2 text-sm text-zinc-500 transition-colors hover:bg-zinc-100 dark:text-zinc-400 dark:hover:bg-zinc-800"
-					title="Toggle theme ({themeLabel})"
-				>
-					{themeIcon}
-				</button>
 			</div>
 
-			<div class="flex items-center gap-2 sm:hidden">
-				<button
-					onclick={() => theme.cycle()}
-					class="rounded-lg p-2 text-zinc-500 hover:bg-zinc-100 dark:text-zinc-400 dark:hover:bg-zinc-800"
-				>
-					{themeIcon}
-				</button>
+			<div class="sm:hidden">
 				<button
 					onclick={() => (mobileMenuOpen = !mobileMenuOpen)}
-					class="rounded-lg p-2 text-zinc-500 hover:bg-zinc-100 dark:text-zinc-400 dark:hover:bg-zinc-800"
+					class="flex h-10 w-10 items-center justify-center rounded-lg text-zinc-500 active:bg-zinc-100 dark:text-zinc-400 dark:active:bg-zinc-800"
 					aria-label="Toggle menu"
 				>
 					{#if mobileMenuOpen}
@@ -127,24 +103,24 @@
 		{#if mobileMenuOpen}
 			<div class="border-t border-zinc-200 px-4 pb-3 pt-2 sm:hidden dark:border-zinc-800">
 				<a href="/" onclick={closeMobileMenu}
-					class="block rounded-lg px-3 py-2 text-sm font-medium text-zinc-600 hover:bg-zinc-100 dark:text-zinc-400 dark:hover:bg-zinc-800"
+					class="flex h-11 items-center rounded-lg px-3 text-sm font-medium text-zinc-600 active:bg-zinc-100 dark:text-zinc-400 dark:active:bg-zinc-800"
 				>
 					Podcasts
 				</a>
 				<a href="/podcast/add" onclick={closeMobileMenu}
-					class="block rounded-lg px-3 py-2 text-sm font-medium text-zinc-600 hover:bg-zinc-100 dark:text-zinc-400 dark:hover:bg-zinc-800"
+					class="flex h-11 items-center rounded-lg px-3 text-sm font-medium text-zinc-600 active:bg-zinc-100 dark:text-zinc-400 dark:active:bg-zinc-800"
 				>
 					Add Podcast
 				</a>
 				<div class="my-1 border-t border-zinc-200 dark:border-zinc-700"></div>
 				<p class="px-3 py-1 text-xs font-medium uppercase tracking-wider text-zinc-400 dark:text-zinc-500">Admin</p>
 				<a href="/admin/config" onclick={closeMobileMenu}
-					class="block rounded-lg px-3 py-2 text-sm font-medium text-zinc-600 hover:bg-zinc-100 dark:text-zinc-400 dark:hover:bg-zinc-800"
+					class="flex h-11 items-center rounded-lg px-3 text-sm font-medium text-zinc-600 active:bg-zinc-100 dark:text-zinc-400 dark:active:bg-zinc-800"
 				>
 					Config
 				</a>
 				<a href="/admin/reports" onclick={closeMobileMenu}
-					class="block rounded-lg px-3 py-2 text-sm font-medium text-zinc-600 hover:bg-zinc-100 dark:text-zinc-400 dark:hover:bg-zinc-800"
+					class="flex h-11 items-center rounded-lg px-3 text-sm font-medium text-zinc-600 active:bg-zinc-100 dark:text-zinc-400 dark:active:bg-zinc-800"
 				>
 					Reports
 				</a>
@@ -152,7 +128,7 @@
 		{/if}
 	</nav>
 
-	<main class="mx-auto max-w-7xl px-4 py-6 sm:px-6">
+	<main class="mx-auto max-w-7xl px-4 py-5 sm:px-6 sm:py-6">
 		{@render children()}
 	</main>
 
@@ -168,7 +144,7 @@
 				<span class="text-sm">{toast.message}</span>
 				<button
 					onclick={() => toasts.removeToast(toast.id)}
-					class="ml-2 text-white/70 hover:text-white"
+					class="ml-2 flex h-6 w-6 flex-shrink-0 items-center justify-center text-white/70 hover:text-white"
 					aria-label="Dismiss"
 				>
 					<svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">

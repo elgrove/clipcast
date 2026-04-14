@@ -8,7 +8,9 @@
 		updatePodcast,
 		deletePodcast,
 		downloadEpisode,
+		cleanupEpisode,
 		clipEpisode,
+		clipAllEpisodes,
 		batchClipEpisodes,
 		getEpisodeStatus
 	} from '$lib/api';
@@ -32,6 +34,7 @@
 	let syncing = $state(false);
 	let showDeleteModal = $state(false);
 	let showSettingsModal = $state(false);
+	let showOverflowMenu = $state(false);
 	let deleteFiles = $state(false);
 	let deleting = $state(false);
 	let descriptionExpanded = $state(false);
@@ -39,11 +42,44 @@
 	let settingsHasAds = $state(true);
 	let cleanupKeepDays: string = $state('');
 	let cleanupKeepCount: string = $state('');
+	let customPrompt: string = $state('');
 
 	let selectedIds: Set<string> = $state(new Set());
 	let downloadingIds: Set<string> = $state(new Set());
 	let clippingIds: Set<string> = $state(new Set());
+	let cleaningIds: Set<string> = $state(new Set());
+	let clippingAll = $state(false);
 	let episodeStatuses: Map<string, ClippingReport> = $state(new Map());
+	let openEpisodeMenu: string | null = $state(null);
+	let mobileSelectMode = $state(false);
+	let longPressTimer: ReturnType<typeof setTimeout> | undefined;
+
+	function startLongPress(episodeId: string) {
+		longPressTimer = setTimeout(() => {
+			mobileSelectMode = true;
+			selectedIds = new Set([episodeId]);
+		}, 500);
+	}
+
+	function cancelLongPress() {
+		if (longPressTimer) {
+			clearTimeout(longPressTimer);
+			longPressTimer = undefined;
+		}
+	}
+
+	function exitMobileSelect() {
+		mobileSelectMode = false;
+		selectedIds = new Set();
+	}
+
+	function mobileCardTap(episodeId: string) {
+		if (!mobileSelectMode) return;
+		toggleSelect(episodeId);
+		if (selectedIds.size === 0) {
+			mobileSelectMode = false;
+		}
+	}
 
 	let pollingInterval: ReturnType<typeof setInterval> | undefined;
 	let syncPollingInterval: ReturnType<typeof setInterval> | undefined;
@@ -80,6 +116,13 @@
 		const d = new Date(dateStr);
 		const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 		return `${d.getDate()} ${months[d.getMonth()]} ${d.getFullYear()}`;
+	}
+
+	function formatDateShort(dateStr: string | null): string {
+		if (!dateStr) return '';
+		const d = new Date(dateStr);
+		const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+		return `${d.getDate()} ${months[d.getMonth()]}`;
 	}
 
 	function statusBadgeClass(status: string): string {
@@ -119,6 +162,7 @@
 
 	async function handleSync() {
 		syncing = true;
+		showOverflowMenu = false;
 		try {
 			await syncPodcast(podcastId);
 			toasts.addToast('success', 'Sync queued');
@@ -133,6 +177,7 @@
 		settingsHasAds = podcast?.has_ads ?? true;
 		cleanupKeepDays = podcast?.cleanup_keep_days?.toString() ?? '';
 		cleanupKeepCount = podcast?.cleanup_keep_count?.toString() ?? '';
+		customPrompt = podcast?.custom_prompt ?? '';
 	}
 
 	async function handleSaveSettings() {
@@ -145,6 +190,7 @@
 				has_ads: settingsHasAds,
 				cleanup_keep_days: days,
 				cleanup_keep_count: count,
+				custom_prompt: customPrompt,
 			});
 			initSettingsFields();
 			showSettingsModal = false;
@@ -197,6 +243,36 @@
 			const next = new Set(clippingIds);
 			next.delete(episodeId);
 			clippingIds = next;
+		}
+	}
+
+	async function handleCleanup(episodeId: string) {
+		cleaningIds = new Set([...cleaningIds, episodeId]);
+		openEpisodeMenu = null;
+		try {
+			await cleanupEpisode(episodeId);
+			toasts.addToast('success', 'Episode cleaned up');
+			await loadEpisodes();
+		} catch (e: any) {
+			toasts.addToast('error', e.message || 'Cleanup failed');
+		} finally {
+			const next = new Set(cleaningIds);
+			next.delete(episodeId);
+			cleaningIds = next;
+		}
+	}
+
+	async function handleClipAll() {
+		clippingAll = true;
+		try {
+			const result = await clipAllEpisodes(podcastId);
+			toasts.addToast('success', `Clipping queued for ${result.report_ids.length} episodes`);
+			await loadEpisodes();
+			startPolling();
+		} catch (e: any) {
+			toasts.addToast('error', e.message || 'Clip all failed');
+		} finally {
+			clippingAll = false;
 		}
 	}
 
@@ -337,36 +413,111 @@
 	});
 </script>
 
+<svelte:window
+	onclick={(e) => {
+		const target = e.target as HTMLElement;
+		if (!target.closest('.overflow-menu')) {
+			showOverflowMenu = false;
+		}
+		if (!target.closest('.episode-menu')) {
+			openEpisodeMenu = null;
+		}
+	}}
+/>
+
 {#if loading}
 	<div class="flex items-center justify-center py-20">
 		<div class="h-8 w-8 animate-spin rounded-full border-2 border-zinc-300 border-t-emerald-500"></div>
 	</div>
 {:else if podcast}
-	<div class="space-y-6">
+	<div class="space-y-5">
 		<!-- Podcast Header -->
-		<div class="flex flex-col gap-6 sm:flex-row">
-			<div class="h-40 w-40 flex-shrink-0 overflow-hidden rounded-xl bg-zinc-200 dark:bg-zinc-800">
+		<div class="flex gap-4 sm:gap-6">
+			<div class="h-24 w-24 flex-shrink-0 overflow-hidden rounded-xl bg-zinc-200 sm:h-40 sm:w-40 dark:bg-zinc-800">
 				{#if podcast.image_url}
 					<img src={podcast.image_url} alt={podcast.title} class="h-full w-full object-cover" />
 				{:else}
 					<div class="flex h-full w-full items-center justify-center">
-						<svg class="h-16 w-16 text-zinc-400 dark:text-zinc-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1">
+						<svg class="h-10 w-10 text-zinc-400 sm:h-16 sm:w-16 dark:text-zinc-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1">
 							<path stroke-linecap="round" stroke-linejoin="round" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" />
 						</svg>
 					</div>
 				{/if}
 			</div>
 			<div class="min-w-0 flex-1">
-				<h1 class="text-2xl font-bold text-zinc-900 dark:text-white">{podcast.title}</h1>
-				<p class="mt-1 text-sm text-zinc-500 dark:text-zinc-400">
-					{podcast.episode_count} episode{podcast.episode_count !== 1 ? 's' : ''}
-					{#if podcast.has_ads}
-						<span class="ml-2 inline-block rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-700 dark:bg-amber-900/30 dark:text-amber-400">Has ads</span>
-					{/if}
-				</p>
+				<div class="flex items-start justify-between gap-2">
+					<div class="min-w-0">
+						<h1 class="text-lg font-bold leading-tight text-zinc-900 sm:text-2xl dark:text-white">{podcast.title}</h1>
+						<p class="mt-1 text-sm text-zinc-500 dark:text-zinc-400">
+							{podcast.episode_count} episode{podcast.episode_count !== 1 ? 's' : ''}
+							{#if podcast.has_ads}
+								<span class="ml-1.5 inline-block rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-700 dark:bg-amber-900/30 dark:text-amber-400">Has ads</span>
+							{/if}
+						</p>
+					</div>
+
+					<!-- Overflow menu (mobile) -->
+					<div class="overflow-menu relative sm:hidden">
+						<button
+							onclick={() => (showOverflowMenu = !showOverflowMenu)}
+							class="flex h-10 w-10 items-center justify-center rounded-lg text-zinc-500 hover:bg-zinc-100 active:bg-zinc-200 dark:text-zinc-400 dark:hover:bg-zinc-800 dark:active:bg-zinc-700"
+							aria-label="More actions"
+						>
+							<svg class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+								<path stroke-linecap="round" stroke-linejoin="round" d="M12 5v.01M12 12v.01M12 19v.01" />
+							</svg>
+						</button>
+						{#if showOverflowMenu}
+							<div class="absolute right-0 top-full z-20 mt-1 w-48 overflow-hidden rounded-xl border border-zinc-200 bg-white shadow-lg dark:border-zinc-700 dark:bg-zinc-800">
+								<button
+									onclick={handleSync}
+									disabled={syncing}
+									class="flex w-full items-center gap-3 px-4 py-3 text-left text-sm text-zinc-700 active:bg-zinc-100 disabled:opacity-50 dark:text-zinc-300 dark:active:bg-zinc-700"
+								>
+									<svg class="h-4 w-4 {syncing ? 'animate-spin' : ''}" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+										<path stroke-linecap="round" stroke-linejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+									</svg>
+									Sync
+								</button>
+								<button
+									onclick={() => { showOverflowMenu = false; initSettingsFields(); showSettingsModal = true; }}
+									class="flex w-full items-center gap-3 px-4 py-3 text-left text-sm text-zinc-700 active:bg-zinc-100 dark:text-zinc-300 dark:active:bg-zinc-700"
+								>
+									<svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+										<path stroke-linecap="round" stroke-linejoin="round" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.066-2.573c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
+										<path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+									</svg>
+									Settings
+								</button>
+								<a
+									href="/feed/{podcast.itunes_id}"
+									target="_blank"
+									onclick={() => (showOverflowMenu = false)}
+									class="flex w-full items-center gap-3 px-4 py-3 text-left text-sm text-zinc-700 active:bg-zinc-100 dark:text-zinc-300 dark:active:bg-zinc-700"
+								>
+									<svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+										<path stroke-linecap="round" stroke-linejoin="round" d="M6 5c7.18 0 13 5.82 13 13M6 11a7 7 0 017 7m-6 0a1 1 0 11-2 0 1 1 0 012 0z" />
+									</svg>
+									RSS Feed
+								</a>
+								<div class="border-t border-zinc-200 dark:border-zinc-700"></div>
+								<button
+									onclick={() => { showOverflowMenu = false; showDeleteModal = true; }}
+									class="flex w-full items-center gap-3 px-4 py-3 text-left text-sm text-red-600 active:bg-red-50 dark:text-red-400 dark:active:bg-red-900/20"
+								>
+									<svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+										<path stroke-linecap="round" stroke-linejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+									</svg>
+									Delete
+								</button>
+							</div>
+						{/if}
+					</div>
+				</div>
+
 				{#if podcast.description}
 					{@const cleanDescription = stripHtml(podcast.description)}
-					<div class="mt-3">
+					<div class="mt-2 hidden sm:block">
 						<p class="text-sm text-zinc-600 dark:text-zinc-400 {descriptionExpanded ? '' : 'line-clamp-3'}">
 							{cleanDescription}
 						</p>
@@ -380,7 +531,9 @@
 						{/if}
 					</div>
 				{/if}
-				<div class="mt-4 flex flex-wrap gap-2">
+
+				<!-- Action buttons (desktop) -->
+				<div class="mt-4 hidden flex-wrap gap-2 sm:flex">
 					<button
 						onclick={handleSync}
 						disabled={syncing}
@@ -426,8 +579,8 @@
 
 		<!-- Episode Controls -->
 		<div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-			<div class="flex flex-1 flex-col gap-3 sm:flex-row sm:items-center">
-				<div class="relative flex-1 sm:max-w-xs">
+			<div class="flex flex-1 gap-2 sm:gap-3">
+				<div class="relative min-w-0 flex-1 sm:max-w-xs">
 					<svg class="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
 						<path stroke-linecap="round" stroke-linejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
 					</svg>
@@ -435,23 +588,24 @@
 						type="text"
 						bind:value={searchQuery}
 						placeholder="Filter episodes..."
-						class="w-full rounded-lg border border-zinc-300 bg-white py-2 pl-9 pr-3 text-sm outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500/20 dark:border-zinc-700 dark:bg-zinc-900 dark:text-white dark:placeholder-zinc-500"
+						class="h-10 w-full rounded-lg border border-zinc-300 bg-white py-2 pl-9 pr-3 text-sm outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500/20 dark:border-zinc-700 dark:bg-zinc-900 dark:text-white dark:placeholder-zinc-500"
 					/>
 				</div>
 				<select
 					value={statusFilter}
 					onchange={(e) => changeStatusFilter(e.currentTarget.value)}
-					class="rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm outline-none focus:border-emerald-500 dark:border-zinc-700 dark:bg-zinc-900 dark:text-white"
+					class="h-10 rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm outline-none focus:border-emerald-500 dark:border-zinc-700 dark:bg-zinc-900 dark:text-white"
 				>
-					<option value="all">All Episodes</option>
+					<option value="all">All</option>
 					<option value="downloaded">Downloaded</option>
 					<option value="clipped">Clipped</option>
 				</select>
 			</div>
+			<!-- Desktop batch clip button -->
 			{#if selectedCount > 0}
 				<button
 					onclick={handleBatchClip}
-					class="inline-flex items-center gap-2 rounded-lg bg-emerald-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-emerald-700"
+					class="hidden items-center gap-2 rounded-lg bg-emerald-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-emerald-700 sm:inline-flex"
 				>
 					<svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
 						<path stroke-linecap="round" stroke-linejoin="round" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" />
@@ -462,7 +616,7 @@
 			{/if}
 		</div>
 
-		<!-- Episodes Table -->
+		<!-- Episodes -->
 		{#if loadingEpisodes}
 			<div class="flex items-center justify-center py-12">
 				<div class="h-6 w-6 animate-spin rounded-full border-2 border-zinc-300 border-t-emerald-500"></div>
@@ -481,7 +635,8 @@
 				{/if}
 			</div>
 		{:else}
-			<div class="overflow-hidden rounded-xl border border-zinc-200 dark:border-zinc-800">
+			<!-- Desktop table (md+) -->
+			<div class="hidden overflow-hidden rounded-xl border border-zinc-200 md:block dark:border-zinc-800">
 				<div class="overflow-x-auto">
 					<table class="w-full text-sm">
 						<thead>
@@ -495,8 +650,8 @@
 									/>
 								</th>
 								<th class="px-3 py-3 text-left font-medium text-zinc-600 dark:text-zinc-400">Title</th>
-								<th class="hidden px-3 py-3 text-left font-medium text-zinc-600 md:table-cell dark:text-zinc-400">Date</th>
-								<th class="hidden px-3 py-3 text-left font-medium text-zinc-600 sm:table-cell dark:text-zinc-400">Duration</th>
+								<th class="px-3 py-3 text-left font-medium text-zinc-600 dark:text-zinc-400">Date</th>
+								<th class="px-3 py-3 text-left font-medium text-zinc-600 dark:text-zinc-400">Duration</th>
 								<th class="px-3 py-3 text-left font-medium text-zinc-600 dark:text-zinc-400">Status</th>
 								<th class="px-3 py-3 text-right font-medium text-zinc-600 dark:text-zinc-400">Actions</th>
 							</tr>
@@ -515,10 +670,10 @@
 									<td class="max-w-xs truncate px-3 py-3 font-medium text-zinc-900 dark:text-white">
 										{episode.title}
 									</td>
-									<td class="hidden whitespace-nowrap px-3 py-3 text-zinc-500 md:table-cell dark:text-zinc-400">
+									<td class="whitespace-nowrap px-3 py-3 text-zinc-500 dark:text-zinc-400">
 										{formatDate(episode.published_at)}
 									</td>
-									<td class="hidden whitespace-nowrap px-3 py-3 text-zinc-500 sm:table-cell dark:text-zinc-400">
+									<td class="whitespace-nowrap px-3 py-3 text-zinc-500 dark:text-zinc-400">
 										{formatDuration(episode.duration)}
 									</td>
 									<td class="px-3 py-3">
@@ -554,30 +709,13 @@
 										</div>
 									</td>
 									<td class="px-3 py-3">
-										<div class="flex justify-end gap-1">
-											{#if !episode.is_downloaded}
-												<button
-													onclick={() => handleDownload(episode.id)}
-													disabled={downloadingIds.has(episode.id)}
-													class="rounded-lg p-1.5 text-zinc-500 transition-colors hover:bg-zinc-100 hover:text-zinc-700 disabled:opacity-50 dark:text-zinc-400 dark:hover:bg-zinc-800 dark:hover:text-zinc-200"
-													title="Download"
-												>
-													{#if downloadingIds.has(episode.id)}
-														<div class="h-4 w-4 animate-spin rounded-full border-2 border-zinc-300 border-t-emerald-500"></div>
-													{:else}
-														<svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-															<path stroke-linecap="round" stroke-linejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
-														</svg>
-													{/if}
-												</button>
-											{/if}
+										<div class="flex items-center justify-end gap-1">
 											<button
 												onclick={() => handleClip(episode.id)}
 												disabled={clippingIds.has(episode.id) ||
 													(episode.clipping_status !== null &&
 														episode.clipping_status !== 'completed')}
 												class="rounded-lg p-1.5 text-zinc-500 transition-colors hover:bg-zinc-100 hover:text-zinc-700 disabled:opacity-50 dark:text-zinc-400 dark:hover:bg-zinc-800 dark:hover:text-zinc-200"
-												title="Clip"
 											>
 												{#if clippingIds.has(episode.id)}
 													<div class="h-4 w-4 animate-spin rounded-full border-2 border-zinc-300 border-t-emerald-500"></div>
@@ -588,6 +726,45 @@
 													</svg>
 												{/if}
 											</button>
+											<div class="episode-menu relative">
+												<button
+													onclick={() => (openEpisodeMenu = openEpisodeMenu === episode.id ? null : episode.id)}
+													class="rounded-lg p-1.5 text-zinc-500 transition-colors hover:bg-zinc-100 hover:text-zinc-700 dark:text-zinc-400 dark:hover:bg-zinc-800 dark:hover:text-zinc-200"
+													aria-label="More actions"
+												>
+													<svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+														<path stroke-linecap="round" stroke-linejoin="round" d="M12 5v.01M12 12v.01M12 19v.01" />
+													</svg>
+												</button>
+												{#if openEpisodeMenu === episode.id}
+													<div class="absolute right-0 top-full z-20 mt-1 w-40 overflow-hidden rounded-xl border border-zinc-200 bg-white shadow-lg dark:border-zinc-700 dark:bg-zinc-800">
+														{#if !episode.is_downloaded}
+															<button
+																onclick={() => { openEpisodeMenu = null; handleDownload(episode.id); }}
+																disabled={downloadingIds.has(episode.id)}
+																class="flex w-full items-center gap-2.5 px-3 py-2.5 text-left text-sm text-zinc-700 hover:bg-zinc-100 disabled:opacity-50 dark:text-zinc-300 dark:hover:bg-zinc-700"
+															>
+																<svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+																	<path stroke-linecap="round" stroke-linejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+																</svg>
+																Download
+															</button>
+														{/if}
+														{#if episode.is_downloaded && !episode.is_cleaned}
+															<button
+																onclick={() => handleCleanup(episode.id)}
+																disabled={cleaningIds.has(episode.id)}
+																class="flex w-full items-center gap-2.5 px-3 py-2.5 text-left text-sm text-red-600 hover:bg-red-50 disabled:opacity-50 dark:text-red-400 dark:hover:bg-red-900/20"
+															>
+																<svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+																	<path stroke-linecap="round" stroke-linejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+																</svg>
+																Clean up
+															</button>
+														{/if}
+													</div>
+												{/if}
+											</div>
 										</div>
 									</td>
 								</tr>
@@ -597,17 +774,189 @@
 				</div>
 			</div>
 
+			<!-- Mobile card list (<md) -->
+			<div class="space-y-2 md:hidden">
+				{#if mobileSelectMode}
+					<!-- Selection mode header -->
+					<div class="flex h-10 items-center justify-between">
+						<span class="text-sm font-medium text-zinc-600 dark:text-zinc-400">
+							{selectedCount} selected
+						</span>
+						<div class="flex gap-2">
+							<button
+								onclick={() => { selectedIds = new Set(filteredEpisodes.map((ep) => ep.id)); }}
+								class="rounded-lg px-3 py-1.5 text-sm font-medium text-zinc-600 active:bg-zinc-100 dark:text-zinc-400 dark:active:bg-zinc-800"
+							>
+								Select all
+							</button>
+							<button
+								onclick={exitMobileSelect}
+								class="rounded-lg px-3 py-1.5 text-sm font-medium text-zinc-600 active:bg-zinc-100 dark:text-zinc-400 dark:active:bg-zinc-800"
+							>
+								Done
+							</button>
+						</div>
+					</div>
+				{:else}
+					<button
+						onclick={handleClipAll}
+						disabled={clippingAll}
+						class="flex h-10 w-full items-center justify-center gap-2 rounded-lg bg-emerald-600 text-sm font-medium text-white active:bg-emerald-700 disabled:opacity-50"
+					>
+						{#if clippingAll}
+							<div class="h-4 w-4 animate-spin rounded-full border-2 border-white/30 border-t-white"></div>
+						{:else}
+							<svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+								<path stroke-linecap="round" stroke-linejoin="round" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" />
+								<path stroke-linecap="round" stroke-linejoin="round" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+							</svg>
+						{/if}
+						Clip All Episodes
+					</button>
+				{/if}
+
+				{#each filteredEpisodes as episode (episode.id)}
+					<!-- svelte-ignore a11y_no_static_element_interactions a11y_click_events_have_key_events -->
+					<div
+						class="rounded-xl border bg-white transition-colors dark:bg-zinc-900 {mobileSelectMode && selectedIds.has(episode.id)
+							? 'border-emerald-500 bg-emerald-50/50 dark:border-emerald-500 dark:bg-emerald-950/20'
+							: 'border-zinc-200 dark:border-zinc-800'}"
+						ontouchstart={() => { if (!mobileSelectMode) startLongPress(episode.id); }}
+						ontouchend={cancelLongPress}
+						ontouchmove={cancelLongPress}
+						onclick={() => mobileCardTap(episode.id)}
+					>
+						<div class="flex items-start gap-3 p-3">
+							{#if mobileSelectMode}
+								<div class="mt-1 flex h-5 w-5 flex-shrink-0 items-center justify-center rounded-full border-2 {selectedIds.has(episode.id) ? 'border-emerald-500 bg-emerald-500' : 'border-zinc-300 dark:border-zinc-600'}">
+									{#if selectedIds.has(episode.id)}
+										<svg class="h-3 w-3 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="3">
+											<path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7" />
+										</svg>
+									{/if}
+								</div>
+							{/if}
+							<div class="min-w-0 flex-1">
+								<p class="text-sm font-medium leading-snug text-zinc-900 dark:text-white">
+									{episode.title}
+								</p>
+								<div class="mt-1 flex items-center gap-2 text-xs text-zinc-500 dark:text-zinc-400">
+									{#if episode.published_at}
+										<span>{formatDateShort(episode.published_at)}</span>
+									{/if}
+									{#if episode.duration}
+										<span>{formatDuration(episode.duration)}</span>
+									{/if}
+								</div>
+								<div class="mt-2 flex flex-wrap gap-1">
+									{#if episode.is_cleaned}
+										<span class="inline-block rounded-full bg-zinc-100 px-2 py-0.5 text-xs font-medium text-zinc-500 dark:bg-zinc-800 dark:text-zinc-500">
+											Cleaned
+										</span>
+									{:else if episode.is_clipped}
+										<span class="inline-block rounded-full bg-emerald-100 px-2 py-0.5 text-xs font-medium text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400">
+											Clipped
+										</span>
+									{:else if episode.is_downloaded}
+										<span class="inline-block rounded-full bg-blue-100 px-2 py-0.5 text-xs font-medium text-blue-700 dark:bg-blue-900/30 dark:text-blue-400">
+											Downloaded
+										</span>
+									{/if}
+									{#if episode.has_transcription && !episode.is_clipped && !episode.is_cleaned}
+										<span class="inline-block rounded-full bg-violet-100 px-2 py-0.5 text-xs font-medium text-violet-700 dark:bg-violet-900/30 dark:text-violet-400">
+											Transcribed
+										</span>
+									{/if}
+									{#if episode.ad_count > 0 && !episode.is_clipped && !episode.is_cleaned}
+										<span class="inline-block rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-700 dark:bg-amber-900/30 dark:text-amber-400">
+											{episode.ad_count} ad{episode.ad_count !== 1 ? 's' : ''}
+										</span>
+									{/if}
+									{#if episode.clipping_status && episode.clipping_status !== 'completed'}
+										<span class="inline-block rounded-full px-2 py-0.5 text-xs font-medium {statusBadgeClass(episode.clipping_status)}">
+											{episode.clipping_status}
+										</span>
+									{/if}
+								</div>
+							</div>
+							{#if !mobileSelectMode}
+								<div class="flex flex-shrink-0 items-start gap-1">
+									<button
+										onclick={() => handleClip(episode.id)}
+										disabled={clippingIds.has(episode.id) ||
+											(episode.clipping_status !== null &&
+												episode.clipping_status !== 'completed')}
+										class="flex h-9 w-9 items-center justify-center rounded-lg text-zinc-500 active:bg-zinc-100 disabled:opacity-50 dark:text-zinc-400 dark:active:bg-zinc-800"
+									>
+										{#if clippingIds.has(episode.id)}
+											<div class="h-4 w-4 animate-spin rounded-full border-2 border-zinc-300 border-t-emerald-500"></div>
+										{:else}
+											<svg class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+												<path stroke-linecap="round" stroke-linejoin="round" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" />
+												<path stroke-linecap="round" stroke-linejoin="round" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+											</svg>
+										{/if}
+									</button>
+									<div class="episode-menu relative">
+										<button
+											onclick={() => (openEpisodeMenu = openEpisodeMenu === episode.id ? null : episode.id)}
+											class="flex h-9 w-9 items-center justify-center rounded-lg text-zinc-500 active:bg-zinc-100 dark:text-zinc-400 dark:active:bg-zinc-800"
+											aria-label="More actions"
+										>
+											<svg class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+												<path stroke-linecap="round" stroke-linejoin="round" d="M12 5v.01M12 12v.01M12 19v.01" />
+											</svg>
+										</button>
+										{#if openEpisodeMenu === episode.id}
+											<div class="absolute right-0 top-full z-20 mt-1 w-40 overflow-hidden rounded-xl border border-zinc-200 bg-white shadow-lg dark:border-zinc-700 dark:bg-zinc-800">
+												{#if !episode.is_downloaded}
+													<button
+														onclick={() => { openEpisodeMenu = null; handleDownload(episode.id); }}
+														disabled={downloadingIds.has(episode.id)}
+														class="flex w-full items-center gap-2.5 px-4 py-3 text-left text-sm text-zinc-700 active:bg-zinc-100 disabled:opacity-50 dark:text-zinc-300 dark:active:bg-zinc-700"
+													>
+														<svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+															<path stroke-linecap="round" stroke-linejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+														</svg>
+														Download
+													</button>
+												{/if}
+												{#if episode.is_downloaded && !episode.is_cleaned}
+													<button
+														onclick={() => handleCleanup(episode.id)}
+														disabled={cleaningIds.has(episode.id)}
+														class="flex w-full items-center gap-2.5 px-4 py-3 text-left text-sm text-red-600 active:bg-red-50 disabled:opacity-50 dark:text-red-400 dark:active:bg-red-900/20"
+													>
+														<svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+															<path stroke-linecap="round" stroke-linejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+														</svg>
+														Clean up
+													</button>
+												{/if}
+											</div>
+										{/if}
+									</div>
+								</div>
+							{/if}
+						</div>
+					</div>
+				{/each}
+			</div>
+
 			<!-- Pagination -->
 			{#if totalPages > 1}
 				<div class="flex items-center justify-between">
-					<p class="text-sm text-zinc-500 dark:text-zinc-400">
+					<p class="hidden text-sm text-zinc-500 sm:block dark:text-zinc-400">
 						Showing {(currentPage - 1) * perPage + 1}–{Math.min(currentPage * perPage, totalEpisodes)} of {totalEpisodes}
+					</p>
+					<p class="text-sm text-zinc-500 sm:hidden dark:text-zinc-400">
+						Page {currentPage} of {totalPages}
 					</p>
 					<div class="flex gap-1">
 						<button
 							onclick={() => changePage(currentPage - 1)}
 							disabled={currentPage === 1}
-							class="rounded-lg px-3 py-1.5 text-sm text-zinc-600 transition-colors hover:bg-zinc-200 disabled:opacity-40 dark:text-zinc-400 dark:hover:bg-zinc-800"
+							class="flex h-10 items-center rounded-lg px-3 text-sm text-zinc-600 transition-colors hover:bg-zinc-200 disabled:opacity-40 dark:text-zinc-400 dark:hover:bg-zinc-800"
 						>
 							Previous
 						</button>
@@ -615,20 +964,20 @@
 							{#if p === 1 || p === totalPages || (p >= currentPage - 2 && p <= currentPage + 2)}
 								<button
 									onclick={() => changePage(p)}
-									class="rounded-lg px-3 py-1.5 text-sm font-medium transition-colors {p === currentPage
+									class="hidden h-10 items-center rounded-lg px-3 text-sm font-medium transition-colors sm:flex {p === currentPage
 										? 'bg-emerald-600 text-white'
 										: 'text-zinc-600 hover:bg-zinc-200 dark:text-zinc-400 dark:hover:bg-zinc-800'}"
 								>
 									{p}
 								</button>
 							{:else if p === currentPage - 3 || p === currentPage + 3}
-								<span class="px-1 py-1.5 text-sm text-zinc-400">...</span>
+								<span class="hidden px-1 py-1.5 text-sm text-zinc-400 sm:inline">...</span>
 							{/if}
 						{/each}
 						<button
 							onclick={() => changePage(currentPage + 1)}
 							disabled={currentPage === totalPages}
-							class="rounded-lg px-3 py-1.5 text-sm text-zinc-600 transition-colors hover:bg-zinc-200 disabled:opacity-40 dark:text-zinc-400 dark:hover:bg-zinc-800"
+							class="flex h-10 items-center rounded-lg px-3 text-sm text-zinc-600 transition-colors hover:bg-zinc-200 disabled:opacity-40 dark:text-zinc-400 dark:hover:bg-zinc-800"
 						>
 							Next
 						</button>
@@ -637,20 +986,39 @@
 			{/if}
 		{/if}
 	</div>
+
+	<!-- Sticky batch action bar (mobile selection mode) -->
+	{#if mobileSelectMode && selectedCount > 0}
+		<div class="fixed inset-x-0 bottom-0 z-40 border-t border-zinc-200 bg-white/95 px-4 py-3 backdrop-blur-md sm:hidden dark:border-zinc-800 dark:bg-zinc-900/95">
+			<button
+				onclick={() => { handleBatchClip(); exitMobileSelect(); }}
+				class="flex h-11 w-full items-center justify-center gap-2 rounded-lg bg-emerald-600 text-sm font-medium text-white active:bg-emerald-700"
+			>
+				<svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+					<path stroke-linecap="round" stroke-linejoin="round" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" />
+					<path stroke-linecap="round" stroke-linejoin="round" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+				</svg>
+				Clip {selectedCount} Episode{selectedCount !== 1 ? 's' : ''}
+			</button>
+		</div>
+	{/if}
 {/if}
 
 <!-- Delete Confirmation Modal -->
 {#if showDeleteModal}
+	<!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
 	<div
-		class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm"
+		class="fixed inset-0 z-50 flex items-end justify-center bg-black/50 backdrop-blur-sm sm:items-center"
 		role="dialog"
+		onclick={(e) => { if (e.target === e.currentTarget) showDeleteModal = false; }}
+		onkeydown={(e) => { if (e.key === 'Escape') showDeleteModal = false; }}
 	>
-		<div class="mx-4 w-full max-w-md rounded-2xl border border-zinc-200 bg-white p-6 shadow-2xl dark:border-zinc-700 dark:bg-zinc-900">
+		<div class="w-full rounded-t-2xl border border-zinc-200 bg-white p-6 shadow-2xl sm:mx-4 sm:max-w-md sm:rounded-2xl dark:border-zinc-700 dark:bg-zinc-900">
 			<h3 class="text-lg font-semibold text-zinc-900 dark:text-white">Delete Podcast</h3>
 			<p class="mt-2 text-sm text-zinc-600 dark:text-zinc-400">
 				Are you sure you want to delete "{podcast?.title}"? This cannot be undone.
 			</p>
-			<label class="mt-4 flex cursor-pointer items-center gap-3">
+			<label class="mt-4 flex cursor-pointer items-center gap-3 py-1">
 				<input
 					type="checkbox"
 					bind:checked={deleteFiles}
@@ -658,17 +1026,17 @@
 				/>
 				<span class="text-sm text-zinc-700 dark:text-zinc-300">Also delete downloaded files</span>
 			</label>
-			<div class="mt-6 flex justify-end gap-3">
+			<div class="mt-6 flex gap-3 sm:justify-end">
 				<button
 					onclick={() => (showDeleteModal = false)}
-					class="rounded-lg px-4 py-2 text-sm font-medium text-zinc-600 transition-colors hover:bg-zinc-100 dark:text-zinc-400 dark:hover:bg-zinc-800"
+					class="flex-1 rounded-lg px-4 py-2.5 text-sm font-medium text-zinc-600 transition-colors hover:bg-zinc-100 sm:flex-initial dark:text-zinc-400 dark:hover:bg-zinc-800"
 				>
 					Cancel
 				</button>
 				<button
 					onclick={handleDelete}
 					disabled={deleting}
-					class="inline-flex items-center gap-2 rounded-lg bg-red-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-red-700 disabled:opacity-50"
+					class="flex flex-1 items-center justify-center gap-2 rounded-lg bg-red-600 px-4 py-2.5 text-sm font-medium text-white transition-colors hover:bg-red-700 disabled:opacity-50 sm:flex-initial"
 				>
 					{#if deleting}
 						<div class="h-4 w-4 animate-spin rounded-full border-2 border-white/30 border-t-white"></div>
@@ -682,15 +1050,18 @@
 
 <!-- Podcast Settings Modal -->
 {#if showSettingsModal}
+	<!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
 	<div
-		class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm"
+		class="fixed inset-0 z-50 flex items-end justify-center bg-black/50 backdrop-blur-sm sm:items-center"
 		role="dialog"
+		onclick={(e) => { if (e.target === e.currentTarget) showSettingsModal = false; }}
+		onkeydown={(e) => { if (e.key === 'Escape') showSettingsModal = false; }}
 	>
-		<div class="mx-4 w-full max-w-md rounded-2xl border border-zinc-200 bg-white p-6 shadow-2xl dark:border-zinc-700 dark:bg-zinc-900">
+		<div class="max-h-[85vh] w-full overflow-y-auto rounded-t-2xl border border-zinc-200 bg-white p-6 shadow-2xl sm:mx-4 sm:max-w-md sm:rounded-2xl dark:border-zinc-700 dark:bg-zinc-900">
 			<h3 class="text-lg font-semibold text-zinc-900 dark:text-white">Podcast Settings</h3>
 
 			<div class="mt-5 space-y-5">
-				<label class="flex cursor-pointer items-center justify-between">
+				<label class="flex cursor-pointer items-center justify-between py-1">
 					<div>
 						<span class="text-sm font-medium text-zinc-700 dark:text-zinc-300">Clipcast enabled</span>
 						<p class="text-xs text-zinc-500 dark:text-zinc-400">Automatically detect and clip adverts from new episodes</p>
@@ -701,6 +1072,24 @@
 						class="h-4 w-4 rounded border-zinc-300 text-emerald-600 focus:ring-emerald-500 dark:border-zinc-600"
 					/>
 				</label>
+
+				<hr class="border-zinc-200 dark:border-zinc-700" />
+
+				<div>
+					<label for="custom-prompt" class="block text-sm font-medium text-zinc-700 dark:text-zinc-300">
+						Custom instructions
+					</label>
+					<p class="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
+						Additional context for the AI when detecting adverts in this podcast.
+					</p>
+					<textarea
+						id="custom-prompt"
+						bind:value={customPrompt}
+						rows="3"
+						placeholder="e.g. Adverts are always at the start and end of the episode, never in the middle"
+						class="mt-2 w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500/20 dark:border-zinc-700 dark:bg-zinc-900 dark:text-white"
+					></textarea>
+				</div>
 
 				<hr class="border-zinc-200 dark:border-zinc-700" />
 
@@ -737,17 +1126,17 @@
 					/>
 				</div>
 			</div>
-			<div class="mt-6 flex justify-end gap-3">
+			<div class="mt-6 flex gap-3 sm:justify-end">
 				<button
 					onclick={() => (showSettingsModal = false)}
-					class="rounded-lg px-4 py-2 text-sm font-medium text-zinc-600 transition-colors hover:bg-zinc-100 dark:text-zinc-400 dark:hover:bg-zinc-800"
+					class="flex-1 rounded-lg px-4 py-2.5 text-sm font-medium text-zinc-600 transition-colors hover:bg-zinc-100 sm:flex-initial dark:text-zinc-400 dark:hover:bg-zinc-800"
 				>
 					Cancel
 				</button>
 				<button
 					onclick={handleSaveSettings}
 					disabled={savingSettings}
-					class="inline-flex items-center gap-2 rounded-lg bg-emerald-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-emerald-700 disabled:opacity-50"
+					class="flex flex-1 items-center justify-center gap-2 rounded-lg bg-emerald-600 px-4 py-2.5 text-sm font-medium text-white transition-colors hover:bg-emerald-700 disabled:opacity-50 sm:flex-initial"
 				>
 					{#if savingSettings}
 						<div class="h-4 w-4 animate-spin rounded-full border-2 border-white/30 border-t-white"></div>

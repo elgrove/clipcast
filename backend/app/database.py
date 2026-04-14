@@ -49,6 +49,13 @@ def _run_migrations() -> None:
         show_columns = [
             row[1] for row in conn.exec_driver_sql("PRAGMA table_info(podcast_shows)").fetchall()
         ]
+        if "custom_prompt" not in show_columns:
+            conn.exec_driver_sql(
+                "ALTER TABLE podcast_shows ADD COLUMN custom_prompt TEXT DEFAULT ''"
+            )
+            conn.commit()
+            logger.info("Added custom_prompt column to podcast_shows")
+
         if "cleanup_keep_days" not in show_columns:
             conn.exec_driver_sql(
                 "ALTER TABLE podcast_shows ADD COLUMN cleanup_keep_days INTEGER DEFAULT NULL"

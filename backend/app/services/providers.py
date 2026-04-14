@@ -42,7 +42,10 @@ class AIProviderBase(ABC):
 
     @abstractmethod
     def analyse_adverts(
-        self, transcription: Transcription, report: AnalysisReport = None
+        self,
+        transcription: Transcription,
+        report: AnalysisReport = None,
+        custom_instructions: str | None = None,
     ) -> PodcastEpisodeAdverts:
         pass
 
@@ -105,7 +108,10 @@ class GeminiProvider(AIProviderBase):
         return Transcription(segments=segments)
 
     def analyse_adverts(
-        self, transcription: Transcription, report: AnalysisReport = None
+        self,
+        transcription: Transcription,
+        report: AnalysisReport = None,
+        custom_instructions: str | None = None,
     ) -> PodcastEpisodeAdverts:
         logger.info("Analysing adverts with Gemini model %s", self.model_config.name)
 
@@ -116,6 +122,8 @@ class GeminiProvider(AIProviderBase):
 
         transcript_json = json.dumps(transcription.model_dump(), indent=2)
         prompt = ANALYSE_ADVERTS_PROMPT.format(transcript=transcript_json)
+        if custom_instructions:
+            prompt += f"\n\nAdditional instructions:\n{custom_instructions}"
 
         response = client.models.generate_content(
             model=self.model_config.name,
@@ -180,7 +188,10 @@ class WhisperProvider(AIProviderBase):
         return Transcription(segments=segments)
 
     def analyse_adverts(
-        self, transcription: Transcription, report: AnalysisReport = None
+        self,
+        transcription: Transcription,
+        report: AnalysisReport = None,
+        custom_instructions: str | None = None,
     ) -> PodcastEpisodeAdverts:
         raise NotImplementedError("WhisperProvider only supports transcription, not analysis")
 

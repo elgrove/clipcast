@@ -69,6 +69,7 @@ export async function updatePodcast(
 		has_ads?: boolean;
 		cleanup_keep_days?: number | null;
 		cleanup_keep_count?: number | null;
+		custom_prompt?: string;
 	}
 ): Promise<PodcastShow> {
 	return fetchApi<PodcastShow>(`/api/podcasts/${id}`, {
@@ -105,8 +106,18 @@ export async function downloadEpisode(id: string): Promise<void> {
 	await fetchApi(`/api/episodes/${id}/download`, { method: 'POST' });
 }
 
+export async function cleanupEpisode(id: string): Promise<void> {
+	await fetchApi(`/api/episodes/${id}`, { method: 'DELETE' });
+}
+
 export async function clipEpisode(id: string): Promise<{ report_id: string }> {
 	return fetchApi<{ report_id: string }>(`/api/episodes/${id}/clip`, {
+		method: 'POST'
+	});
+}
+
+export async function clipAllEpisodes(podcastId: string): Promise<{ report_ids: string[] }> {
+	return fetchApi<{ report_ids: string[] }>(`/api/podcasts/${podcastId}/clip-all`, {
 		method: 'POST'
 	});
 }

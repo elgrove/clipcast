@@ -194,6 +194,7 @@ def task_analyse(self, episode_id: str, report_id: str) -> None:
 
         segments = episode.transcription
         ads_path = episode.ads_path
+        custom_instructions = episode.podcast.custom_prompt or None
 
         config = session.get(AppConfig, "config")
         if not config or not config.analysis_model:
@@ -213,7 +214,7 @@ def task_analyse(self, episode_id: str, report_id: str) -> None:
         model_name=model_name,
     )
     try:
-        adverts = analyse_transcription(segments, provider, analysis_report)
+        adverts = analyse_transcription(segments, provider, analysis_report, custom_instructions)
         analysis_report.completed_at = datetime.utcnow().isoformat()
     except Exception as e:
         analysis_report.error = str(e)

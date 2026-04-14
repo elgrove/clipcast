@@ -140,6 +140,24 @@ def batch_clip(data: BatchClipRequest, session: Session = Depends(get_session)):
     return {"message": f"Clipping queued for {len(reports)} episodes", "report_ids": reports}
 
 
+@router.post("/api/podcasts/{podcast_id}/clip-all", status_code=202)
+def clip_all_episodes(podcast_id: str, session: Session = Depends(get_session)):
+    podcast = session.get(PodcastShow, podcast_id)
+    if not podcast:
+        raise HTTPException(status_code=404, detail="Podcast not found")
+
+    episodes = session.exec(
+        select(PodcastEpisode).where(PodcastEpisode.podcast_id == podcast_id)
+    ).all()
+
+    reports = []
+    for episode in episodes:
+        report = queue_episode_for_clipping(session, episode)
+        reports.append(report.id)
+
+    return {"message": f"Clipping queued for {len(reports)} episodes", "report_ids": reports}
+
+
 @router.get("/api/episodes/{episode_id}/status", response_model=ClippingReportRead | None)
 def episode_status(episode_id: str, session: Session = Depends(get_session)):
     report = session.exec(
@@ -161,6 +179,24 @@ def episode_status(episode_id: str, session: Session = Depends(get_session)):
         logs=report.logs,
         exceptions=report.exceptions,
     )
+
+
+@router.delete("/api/episodes/{episode_id}", status_code=200)
+def cleanup_episode(episode_id: str, session: Session = Depends(get_session)):
+    episode = session.get(PodcastEpisode, episode_id)
+    if not episode:
+        raise HTTPException(status_code=404, detail="Episode not found")
+
+    from app.tasks import _delete_episode_files
+    from datetime import datetime
+
+    files_deleted = _delete_episode_files(episode)
+    episode.cleaned_at = datetime.utcnow()
+    session.add(episode)
+    session.commit()
+
+    logger.info("Cleaned up episode: %s (%d files deleted)", episode.title, files_deleted)
+    return {"message": f"Cleaned up: {episode.title}", "files_deleted": files_deleted}
 
 
 @router.get("/podcasts/{podcast_id}/episode/{episode_id}/audio")

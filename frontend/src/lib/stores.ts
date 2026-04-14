@@ -30,7 +30,7 @@ type Theme = 'light' | 'dark' | 'auto';
 
 function createThemeStore() {
 	const stored = typeof window !== 'undefined' ? localStorage.getItem('theme') : null;
-	const initial: Theme = (stored as Theme) || 'dark';
+	const initial: Theme = (stored as Theme) || 'auto';
 	const { subscribe, set, update } = writable<Theme>(initial);
 
 	function applyTheme(theme: Theme) {
@@ -59,6 +59,11 @@ function createThemeStore() {
 
 	if (typeof window !== 'undefined') {
 		applyTheme(initial);
+		window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => {
+			let current: Theme = 'auto';
+			subscribe((v) => (current = v))();
+			if (current === 'auto') applyTheme('auto');
+		});
 	}
 
 	return { subscribe, set, cycle };

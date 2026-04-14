@@ -172,6 +172,7 @@ class PodcastShow(SQLModel, table=True):
     initial_sync_completed: bool = Field(default=False)
     cleanup_keep_days: int | None = Field(default=None)
     cleanup_keep_count: int | None = Field(default=None)
+    custom_prompt: str = Field(default="", sa_column=Column(Text))
 
     episodes: list["PodcastEpisode"] = Relationship(
         back_populates="podcast",
@@ -386,6 +387,7 @@ class PodcastShowRead(PydanticBaseModel):
     image_url: str | None = None
     cleanup_keep_days: int | None = None
     cleanup_keep_count: int | None = None
+    custom_prompt: str = ""
 
 
 class PodcastEpisodeRead(PydanticBaseModel):
@@ -415,6 +417,7 @@ class PodcastShowUpdate(PydanticBaseModel):
     has_ads: bool | None = None
     cleanup_keep_days: int | None = None
     cleanup_keep_count: int | None = None
+    custom_prompt: str | None = None
 
 
 class ConfigRead(PydanticBaseModel):

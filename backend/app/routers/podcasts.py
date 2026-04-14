@@ -35,6 +35,7 @@ def _podcast_to_read(podcast: PodcastShow, episode_count: int = 0) -> PodcastSho
         image_url=image_url,
         cleanup_keep_days=podcast.cleanup_keep_days,
         cleanup_keep_count=podcast.cleanup_keep_count,
+        custom_prompt=podcast.custom_prompt,
     )
 
 
@@ -116,6 +117,8 @@ def update_podcast(
         podcast.cleanup_keep_days = data.cleanup_keep_days if data.cleanup_keep_days > 0 else None
     if data.cleanup_keep_count is not None:
         podcast.cleanup_keep_count = data.cleanup_keep_count if data.cleanup_keep_count > 0 else None
+    if data.custom_prompt is not None:
+        podcast.custom_prompt = data.custom_prompt
     session.add(podcast)
     session.commit()
     session.refresh(podcast)

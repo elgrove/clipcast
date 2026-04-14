@@ -7,7 +7,7 @@
 		getPodcasts,
 		exportOpml
 	} from '$lib/api';
-	import { toasts } from '$lib/stores';
+	import { toasts, theme } from '$lib/stores';
 	import type { Config, AIModel, PodcastShow } from '$lib/types';
 
 	let config: Config | null = $state(null);
@@ -26,6 +26,9 @@
 	let addingModel = $state(false);
 
 	let feedType = $state('clipcast');
+
+	let currentTheme = $state('auto');
+	theme.subscribe((v) => (currentTheme = v));
 
 	const transcriptionModels = $derived(models);
 	const analysisModels = $derived(models.filter((m) => m.provider === 'gemini'));
@@ -216,6 +219,27 @@
 					{/if}
 					Add Model
 				</button>
+			</div>
+		</div>
+
+		<!-- Appearance -->
+		<div class="rounded-xl border border-zinc-200 bg-white p-6 dark:border-zinc-800 dark:bg-zinc-900">
+			<h2 class="text-lg font-semibold text-zinc-900 dark:text-white">Appearance</h2>
+			<div class="mt-4">
+				<label for="theme-select" class="block text-sm font-medium text-zinc-700 dark:text-zinc-300">
+					Theme
+				</label>
+				<select
+					id="theme-select"
+					value={currentTheme}
+					onchange={(e) => theme.set(e.currentTarget.value as 'light' | 'dark' | 'auto')}
+					class="mt-1 w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm outline-none focus:border-emerald-500 dark:border-zinc-700 dark:bg-zinc-800 dark:text-white"
+				>
+					<option value="auto">Follow system</option>
+					<option value="light">Light</option>
+					<option value="dark">Dark</option>
+				</select>
+				<p class="mt-1 text-xs text-zinc-500 dark:text-zinc-400">Changes are applied immediately</p>
 			</div>
 		</div>
 

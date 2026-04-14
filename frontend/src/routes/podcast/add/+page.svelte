@@ -50,7 +50,7 @@
 	}
 </script>
 
-<div class="space-y-6">
+<div class="space-y-5">
 	<div>
 		<h1 class="text-2xl font-bold text-zinc-900 dark:text-white">Add Podcast</h1>
 		<p class="mt-1 text-sm text-zinc-500 dark:text-zinc-400">Search the iTunes catalogue to find podcasts</p>
@@ -64,7 +64,7 @@
 			type="text"
 			bind:value={query}
 			placeholder="Search for a podcast..."
-			class="w-full rounded-xl border border-zinc-300 bg-white py-3 pl-10 pr-4 text-sm outline-none transition-colors focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20 dark:border-zinc-700 dark:bg-zinc-900 dark:text-white dark:placeholder-zinc-500 dark:focus:border-emerald-500"
+			class="h-12 w-full rounded-xl border border-zinc-300 bg-white py-3 pl-10 pr-4 text-base outline-none transition-colors focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20 sm:h-auto sm:text-sm dark:border-zinc-700 dark:bg-zinc-900 dark:text-white dark:placeholder-zinc-500 dark:focus:border-emerald-500"
 		/>
 		{#if searching}
 			<div class="absolute right-3 top-1/2 -translate-y-1/2">
@@ -80,14 +80,14 @@
 	{/if}
 
 	{#if results.length > 0}
-		<div class="grid grid-cols-2 gap-4 md:grid-cols-3 lg:grid-cols-4">
+		<div class="grid grid-cols-2 gap-3 sm:gap-4 md:grid-cols-3 lg:grid-cols-4">
 			{#each results as result (result.itunes_id)}
 				<button
 					onclick={() => {
 						selectedPodcast = result;
 						hasAds = true;
 					}}
-					class="group overflow-hidden rounded-xl border border-zinc-200 bg-white text-left transition-all hover:shadow-lg hover:ring-2 hover:ring-emerald-500/30 dark:border-zinc-800 dark:bg-zinc-900 dark:hover:border-zinc-700"
+					class="group overflow-hidden rounded-xl border border-zinc-200 bg-white text-left transition-all hover:shadow-lg hover:ring-2 hover:ring-emerald-500/30 active:scale-[0.98] dark:border-zinc-800 dark:bg-zinc-900 dark:hover:border-zinc-700"
 				>
 					<div class="aspect-square overflow-hidden bg-zinc-100 dark:bg-zinc-800">
 						{#if result.artwork_url}
@@ -120,11 +120,14 @@
 </div>
 
 {#if selectedPodcast}
+	<!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
 	<div
-		class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm"
+		class="fixed inset-0 z-50 flex items-end justify-center bg-black/50 backdrop-blur-sm sm:items-center"
 		role="dialog"
+		onclick={(e) => { if (e.target === e.currentTarget) selectedPodcast = null; }}
+		onkeydown={(e) => { if (e.key === 'Escape') selectedPodcast = null; }}
 	>
-		<div class="mx-4 w-full max-w-md rounded-2xl border border-zinc-200 bg-white p-6 shadow-2xl dark:border-zinc-700 dark:bg-zinc-900">
+		<div class="w-full rounded-t-2xl border border-zinc-200 bg-white p-6 shadow-2xl sm:mx-4 sm:max-w-md sm:rounded-2xl dark:border-zinc-700 dark:bg-zinc-900">
 			<div class="flex gap-4">
 				{#if selectedPodcast.artwork_url}
 					<img
@@ -139,7 +142,7 @@
 				</div>
 			</div>
 
-			<label class="mt-6 flex cursor-pointer items-center gap-3">
+			<label class="mt-6 flex cursor-pointer items-center gap-3 py-1">
 				<input
 					type="checkbox"
 					bind:checked={hasAds}
@@ -148,17 +151,17 @@
 				<span class="text-sm text-zinc-700 dark:text-zinc-300">This podcast has adverts</span>
 			</label>
 
-			<div class="mt-6 flex justify-end gap-3">
+			<div class="mt-6 flex gap-3 sm:justify-end">
 				<button
 					onclick={() => (selectedPodcast = null)}
-					class="rounded-lg px-4 py-2 text-sm font-medium text-zinc-600 transition-colors hover:bg-zinc-100 dark:text-zinc-400 dark:hover:bg-zinc-800"
+					class="flex-1 rounded-lg px-4 py-2.5 text-sm font-medium text-zinc-600 transition-colors hover:bg-zinc-100 sm:flex-initial dark:text-zinc-400 dark:hover:bg-zinc-800"
 				>
 					Cancel
 				</button>
 				<button
 					onclick={handleAdd}
 					disabled={adding}
-					class="inline-flex items-center gap-2 rounded-lg bg-emerald-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-emerald-700 disabled:opacity-50"
+					class="flex flex-1 items-center justify-center gap-2 rounded-lg bg-emerald-600 px-4 py-2.5 text-sm font-medium text-white transition-colors hover:bg-emerald-700 disabled:opacity-50 sm:flex-initial"
 				>
 					{#if adding}
 						<div class="h-4 w-4 animate-spin rounded-full border-2 border-white/30 border-t-white"></div>

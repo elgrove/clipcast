@@ -1,25 +1,107 @@
 services:
   clipcast:
-    image: clipcast:latest
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
     ports:
       - "8906:8906"
     volumes:
       - ./data:/data
       - ./podcasts:/podcasts
     environment:
-      - DEBUG=False
-      - ALLOWED_HOSTS=*
+      - REDIS_URL=redis://redis:6379/0
+      - DATABASE_PATH=/data/clipcast.db
+      - PODCASTS_DIR=/podcasts
+      - FRONTEND_DIR=static/frontend
+    depends_on:
+      - redis
     restart: unless-stopped
+
+  # Sync, download, editing — fast general tasks + beat scheduler
+  worker:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    command: >
+      bash -c "uv run python -c 'from app.database import init_db; init_db()' &&
+      uv run celery -A app.worker:celery_app worker --beat
+      --queues=default --concurrency=2 --loglevel=info
+      -n default@%h"
+    volumes:
+      - ./data:/data
+      - ./podcasts:/podcasts
+    environment:
+      - REDIS_URL=redis://redis:6379/0
+      - DATABASE_PATH=/data/clipcast.db
+      - PODCASTS_DIR=/podcasts
+    depends_on:
+      - redis
+    restart: unless-stopped
+
+  # Gemini API transcription + analysis — can handle parallel requests
+  aiworker:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    command: >
+      bash -c "uv run python -c 'from app.database import init_db; init_db()' &&
+      uv run celery -A app.worker:celery_app worker
+      --queues=ai --concurrency=2 --loglevel=info
+      -n ai@%h"
+    volumes:
+      - ./data:/data
+      - ./podcasts:/podcasts
+    environment:
+      - REDIS_URL=redis://redis:6379/0
+      - DATABASE_PATH=/data/clipcast.db
+      - PODCASTS_DIR=/podcasts
+    depends_on:
+      - redis
+    restart: unless-stopped
+
+  # Local whisper.cpp transcription — one at a time
+  whisperworker:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    command: >
+      bash -c "uv run python -c 'from app.database import init_db; init_db()' &&
+      uv run celery -A app.worker:celery_app worker
+      --queues=whisper --concurrency=1 --loglevel=info
+      -n whisper@%h"
+    volumes:
+      - ./data:/data
+      - ./podcasts:/podcasts
+    environment:
+      - REDIS_URL=redis://redis:6379/0
+      - DATABASE_PATH=/data/clipcast.db
+      - PODCASTS_DIR=/podcasts
+    depends_on:
+      - redis
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    volumes:
+      - redis_data:/data
+    restart: unless-stopped
+
   transcription:
     image: ghcr.io/ggml-org/whisper.cpp:main
     platform: linux/amd64
-    ports:
-      - "8998:8998"
     entrypoint: []
-    command: [ "./build/bin/whisper-server", "--host", "0.0.0.0", "--port", "8998", "--model", "/models/ggml-base.en.bin", "--no-gpu", "--convert" ]
+    command: >
+      ./build/bin/whisper-server
+      --host 0.0.0.0 --port 8998
+      --model /models/ggml-base.en.bin
+      --no-gpu --convert
     volumes:
-      - ./transcription/models:/models # pre-built models
+      - ./transcription/models:/models
     deploy:
       resources:
         limits:
-          cpus: 2
+          cpus: "2"
+    restart: unless-stopped
+
+volumes:
+  redis_data:
