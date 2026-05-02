@@ -17,6 +17,7 @@ engine = create_engine(
 
 def init_db() -> None:
     import app.models  # noqa: F401 — ensure all models are registered
+
     SQLModel.metadata.create_all(engine)
     with engine.connect() as conn:
         conn.exec_driver_sql("PRAGMA journal_mode=WAL")
@@ -30,7 +31,8 @@ def _run_migrations() -> None:
     with engine.connect() as conn:
         # Skip migrations if tables were just created (fresh install)
         tables = [
-            row[0] for row in conn.exec_driver_sql(
+            row[0]
+            for row in conn.exec_driver_sql(
                 "SELECT name FROM sqlite_master WHERE type='table'"
             ).fetchall()
         ]
@@ -75,6 +77,17 @@ def _run_migrations() -> None:
             conn.commit()
             logger.info("Added cleanup columns to podcast_shows")
 
+        if "clip_mode" not in show_columns:
+            conn.exec_driver_sql(
+                "ALTER TABLE podcast_shows ADD COLUMN clip_mode VARCHAR(10) DEFAULT 'ai'"
+            )
+            conn.exec_driver_sql(
+                "UPDATE podcast_shows SET clip_mode = CASE WHEN has_ads THEN 'ai' ELSE 'off' END"
+                " WHERE clip_mode = 'ai'"
+            )
+            conn.commit()
+            logger.info("Added clip_mode column to podcast_shows and backfilled from has_ads")
+
 
 def _backfill_stored_filenames() -> None:
     from app.models import PodcastEpisode
@@ -99,7 +112,11 @@ def _backfill_stored_filenames() -> None:
                 # Search for any matching file by date prefix
                 date_prefix = generated.split("_")[0]
                 for f in directory.iterdir() if directory.exists() else []:
-                    if f.name.startswith(date_prefix) and f.name.endswith(".mp3") and not f.name.endswith(".raw"):
+                    if (
+                        f.name.startswith(date_prefix)
+                        and f.name.endswith(".mp3")
+                        and not f.name.endswith(".raw")
+                    ):
                         episode.stored_filename = f.stem
                         session.add(episode)
                         count += 1

@@ -50,10 +50,10 @@ export async function getPodcast(id: string): Promise<PodcastShow> {
 	return fetchApi<PodcastShow>(`/api/podcasts/${id}`);
 }
 
-export async function addPodcast(itunesId: string, hasAds: boolean): Promise<PodcastShow> {
+export async function addPodcast(itunesId: string, clipMode: string): Promise<PodcastShow> {
 	return fetchApi<PodcastShow>('/api/podcasts', {
 		method: 'POST',
-		body: JSON.stringify({ itunes_id: itunesId, has_ads: hasAds })
+		body: JSON.stringify({ itunes_id: itunesId, clip_mode: clipMode })
 	});
 }
 
@@ -66,7 +66,7 @@ export async function deletePodcast(id: string, deleteFiles = false): Promise<vo
 export async function updatePodcast(
 	id: string,
 	data: {
-		has_ads?: boolean;
+		clip_mode?: string;
 		cleanup_keep_days?: number | null;
 		cleanup_keep_count?: number | null;
 		custom_prompt?: string;

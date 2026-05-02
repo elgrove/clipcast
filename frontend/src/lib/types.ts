@@ -5,7 +5,7 @@ export interface PodcastShow {
 	description: string;
 	itunes_id: string;
 	source_rss_url: string;
-	has_ads: boolean;
+	clip_mode: 'off' | 'ai' | 'acast';
 	initial_sync_completed: boolean;
 	episode_count: number;
 	image_url: string | null;
@@ -106,4 +106,5 @@ export interface ITunesSearchResult {
 	artwork_url: string;
 	genre: string;
 	episode_count: number | null;
+	ads_by_acast: boolean;
 }

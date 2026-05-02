@@ -7,6 +7,7 @@ from sqlmodel import Session, func, select
 
 from app.database import get_session
 from app.models import (
+    ClipMode,
     PodcastEpisode,
     PodcastShow,
     PodcastShowCreate,
@@ -29,7 +30,7 @@ def _podcast_to_read(podcast: PodcastShow, episode_count: int = 0) -> PodcastSho
         description=podcast.description,
         itunes_id=podcast.itunes_id,
         source_rss_url=podcast.source_rss_url,
-        has_ads=podcast.has_ads,
+        clip_mode=podcast.clip_mode,
         initial_sync_completed=podcast.initial_sync_completed,
         episode_count=episode_count,
         image_url=image_url,
@@ -62,12 +63,17 @@ def add_podcast(data: PodcastShowCreate, session: Session = Depends(get_session)
     if not podcast_info:
         raise HTTPException(status_code=404, detail="Podcast not found on iTunes")
 
+    # Auto-upgrade to acast mode if the feed is on feeds.acast.com and client sent default
+    clip_mode = data.clip_mode
+    if clip_mode == ClipMode.AI and podcast_info.ads_by_acast:
+        clip_mode = ClipMode.ACAST
+
     podcast = PodcastShow(
         itunes_id=data.itunes_id,
         title=podcast_info.title,
         source_rss_url=podcast_info.feed_url,
         path_directory=PodcastShow.generate_directory_name(podcast_info.title),
-        has_ads=data.has_ads,
+        clip_mode=clip_mode,
     )
     podcast.directory.mkdir(parents=True, exist_ok=True)
 
@@ -111,12 +117,16 @@ def update_podcast(
     podcast = session.get(PodcastShow, podcast_id)
     if not podcast:
         raise HTTPException(status_code=404, detail="Podcast not found")
-    if data.has_ads is not None:
-        podcast.has_ads = data.has_ads
+    if data.clip_mode is not None:
+        if data.clip_mode not in ClipMode._value2member_map_:
+            raise HTTPException(status_code=422, detail=f"Invalid clip_mode: {data.clip_mode}")
+        podcast.clip_mode = data.clip_mode
     if data.cleanup_keep_days is not None:
         podcast.cleanup_keep_days = data.cleanup_keep_days if data.cleanup_keep_days > 0 else None
     if data.cleanup_keep_count is not None:
-        podcast.cleanup_keep_count = data.cleanup_keep_count if data.cleanup_keep_count > 0 else None
+        podcast.cleanup_keep_count = (
+            data.cleanup_keep_count if data.cleanup_keep_count > 0 else None
+        )
     if data.custom_prompt is not None:
         podcast.custom_prompt = data.custom_prompt
     session.add(podcast)
