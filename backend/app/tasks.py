@@ -7,8 +7,10 @@ from sqlmodel import Session, select
 
 from app.database import engine
 from app.models import (
+    ACAST_ADVERT_LABEL,
     AnalysisReport,
     AppConfig,
+    ClipMode,
     ClippingReport,
     PodcastEpisode,
     PodcastShow,
@@ -244,9 +246,7 @@ def task_analyse(self, episode_id: str, report_id: str) -> None:
     # Write JSON file
     from app.services.providers import PodcastEpisodeAdverts
 
-    ads_path.write_text(
-        json.dumps(PodcastEpisodeAdverts(adverts=adverts).model_dump(), indent=2)
-    )
+    ads_path.write_text(json.dumps(PodcastEpisodeAdverts(adverts=adverts).model_dump(), indent=2))
 
 
 @celery_app.task(
@@ -277,6 +277,87 @@ def task_edit(self, episode_id: str, report_id: str) -> None:
     _log_report(report_id, "Clipping pipeline completed successfully")
 
 
+@celery_app.task(
+    name="app.tasks.task_detect_acast_ads",
+    bind=True,
+    max_retries=3,
+    default_retry_delay=30,
+    autoretry_for=(Exception,),
+    retry_backoff=True,
+    retry_backoff_max=300,
+    soft_time_limit=1800,
+    time_limit=1860,
+)
+def task_detect_acast_ads(self, episode_id: str, report_id: str) -> None:
+    from app.services.acast import detect_idents, idents_to_adverts, pair_idents
+
+    with Session(engine) as session:
+        episode = session.get(PodcastEpisode, episode_id)
+        if not episode:
+            raise ValueError(f"Episode not found: {episode_id}")
+
+        # Idempotency: skip if already detected by acast (not re-detectable from AI run)
+        existing_ads = episode.ads
+        if existing_ads and all(a.advert_for == ACAST_ADVERT_LABEL for a in existing_ads):
+            _log_report(report_id, "Acast ads already detected, skipping")
+            return
+
+        audio_path = episode.mp3_path
+
+    # Advance status to ANALYSING by setting transcribed_at (no actual transcription)
+    _update_report(report_id, transcribed_at=datetime.utcnow())
+    _log_report(report_id, "Detecting Acast idents...")
+
+    analysis_report = AnalysisReport(
+        started_at=datetime.utcnow().isoformat(),
+        provider="acast",
+        model_name="ident_match",
+    )
+    try:
+        idents = detect_idents(audio_path)
+        pairs, unpaired = pair_idents(idents)
+        adverts = idents_to_adverts(pairs)
+        analysis_report.completed_at = datetime.utcnow().isoformat()
+        analysis_report.adverts_found = len(pairs)
+    except Exception as e:
+        analysis_report.error = str(e)
+        with Session(engine) as session:
+            report = session.get(ClippingReport, report_id)
+            report.analysis_report = analysis_report
+            report.add_exception(e)
+            report.append_log(f"Acast detection failed: {e}")
+            session.add(report)
+            session.commit()
+        raise
+
+    with Session(engine) as session:
+        episode = session.get(PodcastEpisode, episode_id)
+        episode.ads = adverts
+        session.add(episode)
+        session.commit()
+
+        report = session.get(ClippingReport, report_id)
+        report.analysis_report = analysis_report
+        report.analysed_at = datetime.utcnow()
+
+        log_msg = f"Acast detection: {len(idents)} idents, {len(pairs)} pairs, {unpaired} unpaired"
+        report.append_log(log_msg)
+
+        warnings: list[str] = []
+        if unpaired > 0:
+            warnings.append(f"WARNING: {unpaired} unpaired idents — possible missed ad break(s)")
+        if len(pairs) == 0:
+            warnings.append("WARNING: 0 ad breaks detected — episode passed through unchanged")
+        if warnings:
+            for w in warnings:
+                report.append_log(w)
+            analysis_report.warnings = "; ".join(warnings)
+            report.analysis_report = analysis_report
+
+        session.add(report)
+        session.commit()
+
+
 # ── Queue orchestration ──────────────────────────────────────────────────────
 
 
@@ -305,14 +386,24 @@ def queue_episode_for_clipping(
     session.commit()
     session.refresh(report)
 
-    transcription_queue = _get_transcription_queue(session)
+    clip_mode = episode.podcast.clip_mode
 
-    pipeline = chain(
-        task_download.si(episode.id, report.id),
-        task_transcribe.si(episode.id, report.id).set(queue=transcription_queue),
-        task_analyse.si(episode.id, report.id),
-        task_edit.si(episode.id, report.id),
-    )
+    if clip_mode == ClipMode.ACAST:
+        pipeline = chain(
+            task_download.si(episode.id, report.id),
+            task_detect_acast_ads.si(episode.id, report.id),
+            task_edit.si(episode.id, report.id),
+        )
+    else:
+        assert clip_mode == ClipMode.AI, f"Unexpected clip_mode: {clip_mode}"
+        transcription_queue = _get_transcription_queue(session)
+        pipeline = chain(
+            task_download.si(episode.id, report.id),
+            task_transcribe.si(episode.id, report.id).set(queue=transcription_queue),
+            task_analyse.si(episode.id, report.id),
+            task_edit.si(episode.id, report.id),
+        )
+
     result = pipeline.apply_async()
 
     report.celery_task_id = result.id
@@ -440,7 +531,7 @@ def sync_and_process_new_episodes() -> dict[str, int]:
 
                 session.commit()
 
-                if podcast.has_ads:
+                if podcast.clip_mode != ClipMode.OFF:
                     for episode in new_episodes:
                         session.refresh(episode)
                         new_count += 1

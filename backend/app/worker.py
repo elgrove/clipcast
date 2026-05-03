@@ -17,6 +17,7 @@ celery_app.conf.update(
     task_default_queue="default",
     task_routes={
         "app.tasks.task_download": {"queue": "default"},
+        "app.tasks.task_detect_acast_ads": {"queue": "default"},
         "app.tasks.task_analyse": {"queue": "ai"},
         "app.tasks.task_edit": {"queue": "default"},
         # task_transcribe is routed dynamically at queue time

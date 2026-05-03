@@ -39,7 +39,7 @@
 	let deleting = $state(false);
 	let descriptionExpanded = $state(false);
 	let savingSettings = $state(false);
-	let settingsHasAds = $state(true);
+	let settingsClipMode = $state<'off' | 'ai' | 'acast'>('ai');
 	let cleanupKeepDays: string = $state('');
 	let cleanupKeepCount: string = $state('');
 	let customPrompt: string = $state('');
@@ -174,7 +174,7 @@
 	}
 
 	function initSettingsFields() {
-		settingsHasAds = podcast?.has_ads ?? true;
+		settingsClipMode = (podcast?.clip_mode ?? 'ai') as 'off' | 'ai' | 'acast';
 		cleanupKeepDays = podcast?.cleanup_keep_days?.toString() ?? '';
 		cleanupKeepCount = podcast?.cleanup_keep_count?.toString() ?? '';
 		customPrompt = podcast?.custom_prompt ?? '';
@@ -187,7 +187,7 @@
 			const days = cleanupKeepDays ? parseInt(cleanupKeepDays) : 0;
 			const count = cleanupKeepCount ? parseInt(cleanupKeepCount) : 0;
 			podcast = await updatePodcast(podcastId, {
-				has_ads: settingsHasAds,
+				clip_mode: settingsClipMode,
 				cleanup_keep_days: days,
 				cleanup_keep_count: count,
 				custom_prompt: customPrompt,
@@ -450,8 +450,10 @@
 						<h1 class="text-lg font-bold leading-tight text-zinc-900 sm:text-2xl dark:text-white">{podcast.title}</h1>
 						<p class="mt-1 text-sm text-zinc-500 dark:text-zinc-400">
 							{podcast.episode_count} episode{podcast.episode_count !== 1 ? 's' : ''}
-							{#if podcast.has_ads}
-								<span class="ml-1.5 inline-block rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-700 dark:bg-amber-900/30 dark:text-amber-400">Has ads</span>
+							{#if podcast.clip_mode === 'ai'}
+								<span class="ml-1.5 inline-block rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-700 dark:bg-amber-900/30 dark:text-amber-400">AI</span>
+							{:else if podcast.clip_mode === 'acast'}
+								<span class="ml-1.5 inline-block rounded-full bg-sky-100 px-2 py-0.5 text-xs font-medium text-sky-700 dark:bg-sky-900/30 dark:text-sky-400">Acast</span>
 							{/if}
 						</p>
 					</div>
@@ -1058,17 +1060,23 @@
 			<h3 class="text-lg font-semibold text-zinc-900 dark:text-white">Podcast Settings</h3>
 
 			<div class="mt-5 space-y-5">
-				<label class="flex cursor-pointer items-center justify-between py-1">
-					<div>
-						<span class="text-sm font-medium text-zinc-700 dark:text-zinc-300">Clipcast enabled</span>
-						<p class="text-xs text-zinc-500 dark:text-zinc-400">Automatically detect and clip adverts from new episodes</p>
+				<div>
+					<p class="text-sm font-medium text-zinc-700 dark:text-zinc-300">Clipping mode</p>
+					<p class="mt-0.5 text-xs text-zinc-500 dark:text-zinc-400">How adverts are detected for this podcast</p>
+					<div class="mt-2 flex rounded-lg border border-zinc-200 dark:border-zinc-700 overflow-hidden">
+						{#each [{ value: 'ai', label: 'AI clipping' }, { value: 'acast', label: 'Acast' }, { value: 'off', label: 'Off' }] as option}
+							<button
+								type="button"
+								onclick={() => (settingsClipMode = option.value as 'off' | 'ai' | 'acast')}
+								class="flex-1 py-2 text-sm font-medium transition-colors {settingsClipMode === option.value
+									? 'bg-emerald-600 text-white'
+									: 'text-zinc-600 hover:bg-zinc-50 dark:text-zinc-400 dark:hover:bg-zinc-800'}"
+							>
+								{option.label}
+							</button>
+						{/each}
 					</div>
-					<input
-						type="checkbox"
-						bind:checked={settingsHasAds}
-						class="h-4 w-4 rounded border-zinc-300 text-emerald-600 focus:ring-emerald-500 dark:border-zinc-600"
-					/>
-				</label>
+				</div>
 
 				<hr class="border-zinc-200 dark:border-zinc-700" />
 

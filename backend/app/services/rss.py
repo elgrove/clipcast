@@ -8,6 +8,7 @@ from pydantic import BaseModel as PydanticBaseModel
 from sqlmodel import Session, select
 
 from app.models import PodcastEpisode, PodcastShow
+from app.services.acast import acast_feed_url_heuristic
 
 logger = logging.getLogger(__name__)
 
@@ -22,6 +23,7 @@ class ITunesPodcast(PydanticBaseModel):
     feed_url: str
     artwork_url: str
     genre: str
+    ads_by_acast: bool = False
 
 
 class RSSEpisode(PydanticBaseModel):
@@ -56,14 +58,16 @@ def search_itunes(term: str, limit: int = 25) -> list[ITunesPodcast]:
 
     results = []
     for item in data.get("results", []):
+        feed_url = item.get("feedUrl", "")
         results.append(
             ITunesPodcast(
                 itunes_id=str(item.get("collectionId", "")),
                 title=item.get("collectionName", ""),
                 artist=item.get("artistName", ""),
-                feed_url=item.get("feedUrl", ""),
+                feed_url=feed_url,
                 artwork_url=item.get("artworkUrl600", item.get("artworkUrl100", "")),
                 genre=item.get("primaryGenreName", ""),
+                ads_by_acast=acast_feed_url_heuristic(feed_url),
             )
         )
     return results
@@ -83,13 +87,15 @@ def lookup_itunes(itunes_id: str) -> ITunesPodcast | None:
         return None
 
     item = results[0]
+    feed_url = item.get("feedUrl", "")
     return ITunesPodcast(
         itunes_id=str(item.get("collectionId", "")),
         title=item.get("collectionName", ""),
         artist=item.get("artistName", ""),
-        feed_url=item.get("feedUrl", ""),
+        feed_url=feed_url,
         artwork_url=item.get("artworkUrl600", item.get("artworkUrl100", "")),
         genre=item.get("primaryGenreName", ""),
+        ads_by_acast=acast_feed_url_heuristic(feed_url),
     )
 
 
@@ -192,12 +198,14 @@ def sync_podcast_from_itunes(session: Session, itunes_id: str) -> PodcastShow:
         podcast.title = podcast_info.title
         podcast.source_rss_url = podcast_info.feed_url
     else:
+        from app.models import ClipMode
+
         podcast = PodcastShow(
             itunes_id=itunes_id,
             title=podcast_info.title,
             source_rss_url=podcast_info.feed_url,
             path_directory=PodcastShow.generate_directory_name(podcast_info.title),
-            has_ads=True,
+            clip_mode=ClipMode.ACAST if podcast_info.ads_by_acast else ClipMode.AI,
         )
 
     session.add(podcast)

@@ -55,6 +55,7 @@ class AnalysisReport(PydanticBaseModel):
     output_tokens: int | None = None
     cost_usd: float | None = None
     adverts_found: int | None = None
+    warnings: str | None = None
     error: str | None = None
 
     @property
@@ -67,6 +68,15 @@ class AnalysisReport(PydanticBaseModel):
 
 
 # ── Enums ────────────────────────────────────────────────────────────────────
+
+
+ACAST_ADVERT_LABEL = "Acast ad break"
+
+
+class ClipMode(StrEnum):
+    OFF = "off"
+    AI = "ai"
+    ACAST = "acast"
 
 
 class Provider(StrEnum):
@@ -168,7 +178,8 @@ class PodcastShow(SQLModel, table=True):
     itunes_id: str = Field(unique=True, max_length=100)
     source_rss_url: str = Field(max_length=500)
     path_directory: str = Field(max_length=500)
-    has_ads: bool
+    has_ads: bool = Field(default=True)
+    clip_mode: str = Field(default=ClipMode.AI, max_length=10)
     initial_sync_completed: bool = Field(default=False)
     cleanup_keep_days: int | None = Field(default=None)
     cleanup_keep_count: int | None = Field(default=None)
@@ -381,7 +392,7 @@ class PodcastShowRead(PydanticBaseModel):
     description: str
     itunes_id: str
     source_rss_url: str
-    has_ads: bool
+    clip_mode: str
     initial_sync_completed: bool
     episode_count: int = 0
     image_url: str | None = None
@@ -410,11 +421,11 @@ class PodcastEpisodeRead(PydanticBaseModel):
 
 class PodcastShowCreate(PydanticBaseModel):
     itunes_id: str
-    has_ads: bool = True
+    clip_mode: str = ClipMode.AI
 
 
 class PodcastShowUpdate(PydanticBaseModel):
-    has_ads: bool | None = None
+    clip_mode: str | None = None
     cleanup_keep_days: int | None = None
     cleanup_keep_count: int | None = None
     custom_prompt: str | None = None
@@ -502,3 +513,4 @@ class ITunesSearchResult(PydanticBaseModel):
     artwork_url: str
     genre: str
     episode_count: int | None = None
+    ads_by_acast: bool = False

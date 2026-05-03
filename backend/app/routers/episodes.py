@@ -31,14 +31,9 @@ def _episode_to_read(episode: PodcastEpisode, session: Session) -> PodcastEpisod
     ).first()
 
     is_downloaded = bool(
-        episode.cleaned_at
-        or (latest_report and latest_report.downloaded_at)
-        or episode.has_file
+        episode.cleaned_at or (latest_report and latest_report.downloaded_at) or episode.has_file
     )
-    is_clipped = bool(
-        episode.cleaned_at
-        or (latest_report and latest_report.edited_at)
-    )
+    is_clipped = bool(episode.cleaned_at or (latest_report and latest_report.edited_at))
 
     return PodcastEpisodeRead(
         id=episode.id,
@@ -187,8 +182,9 @@ def cleanup_episode(episode_id: str, session: Session = Depends(get_session)):
     if not episode:
         raise HTTPException(status_code=404, detail="Episode not found")
 
-    from app.tasks import _delete_episode_files
     from datetime import datetime
+
+    from app.tasks import _delete_episode_files
 
     files_deleted = _delete_episode_files(episode)
     episode.cleaned_at = datetime.utcnow()
