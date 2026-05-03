@@ -315,7 +315,8 @@ def task_detect_acast_ads(self, episode_id: str, report_id: str) -> None:
     )
     try:
         idents = detect_idents(audio_path)
-        pairs, unpaired = pair_idents(idents)
+        audio_duration = episode.duration and float(episode.duration)
+        pairs, unpaired = pair_idents(idents, audio_duration=audio_duration)
         adverts = idents_to_adverts(pairs)
         analysis_report.completed_at = datetime.utcnow().isoformat()
         analysis_report.adverts_found = len(pairs)

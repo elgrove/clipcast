@@ -60,13 +60,14 @@ def detect_idents(audio_path: Path) -> list[tuple[float, float]]:
 
     peak_indices = np.where(normalised > THRESHOLD)[0]
 
-    # Non-maximum suppression: keep only peaks separated by at least ident length
+    # Non-maximum suppression: keep only peaks separated by at least 2x ident length
+    # (1x would allow a spurious secondary peak immediately after a real ident ends)
     kept: list[int] = []
     if len(peak_indices) > 0:
         last = peak_indices[0]
         kept.append(last)
         for idx in peak_indices[1:]:
-            if idx - last >= n:
+            if idx - last >= 2 * n:
                 kept.append(idx)
                 last = idx
 
@@ -75,10 +76,15 @@ def detect_idents(audio_path: Path) -> list[tuple[float, float]]:
 
 def pair_idents(
     idents: list[tuple[float, float]],
+    audio_duration: float | None = None,
 ) -> tuple[list[tuple[tuple[float, float], tuple[float, float]]], int]:
+    if not idents:
+        return [], 0
+
     pairs: list[tuple[tuple[float, float], tuple[float, float]]] = []
-    unpaired = 0
+    used: set[int] = set()
     i = 0
+
     while i < len(idents):
         if i + 1 < len(idents):
             current = idents[i]
@@ -86,14 +92,32 @@ def pair_idents(
             gap = nxt[0] - current[1]
             if MIN_PAIR_GAP_S <= gap <= MAX_PAIR_GAP_S:
                 pairs.append((current, nxt))
+                used.add(i)
+                used.add(i + 1)
                 i += 2
             else:
-                unpaired += 1
                 i += 1
         else:
-            unpaired += 1
             i += 1
-    return pairs, unpaired
+
+    # Start-of-file: first ident unpaired and within MAX_PAIR_GAP_S of the start →
+    # it's a closing ident; the episode began mid-ad-break with no opening ident.
+    if 0 not in used and idents[0][0] < MAX_PAIR_GAP_S:
+        pairs.insert(0, ((0.0, 0.0), idents[0]))
+        used.add(0)
+
+    # End-of-file: last ident unpaired and within MAX_PAIR_GAP_S of the end →
+    # it's an opening ident; the episode ended mid-ad-break with no closing ident.
+    last_idx = len(idents) - 1
+    if (
+        last_idx not in used
+        and audio_duration is not None
+        and (audio_duration - idents[last_idx][1]) < MAX_PAIR_GAP_S
+    ):
+        pairs.append((idents[last_idx], (audio_duration, audio_duration)))
+        used.add(last_idx)
+
+    return pairs, len(idents) - len(used)
 
 
 def idents_to_adverts(
@@ -101,10 +125,14 @@ def idents_to_adverts(
 ) -> list[PodcastEpisodeAdvert]:
     adverts = []
     for first, second in pairs:
+        # For start-of-file pairs the sentinel first=(0,0) means no opening ident exists.
+        # Cut to the start of the closing ident so it is kept as the transition sound.
+        # For all other pairs, cut to the end of the closing ident (opening ident is kept).
+        end_time = second[0] if first == (0.0, 0.0) else second[1]
         adverts.append(
             PodcastEpisodeAdvert(
                 start_time=_format_time(first[1]),
-                end_time=_format_time(second[1]),
+                end_time=_format_time(end_time),
                 advert_for=ACAST_ADVERT_LABEL,
                 front_text="",
                 tail_text="",
