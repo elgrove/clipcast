@@ -318,7 +318,7 @@ def get_ai_provider(task_type: str, config: AppConfig) -> AIProviderBase:
 
     provider_type = Provider(model_config.provider)
 
-    if task_type == "analysis" and provider_type == Provider.WHISPER:
+    if task_type == "analysis" and provider_type == Provider.WHISPER_CPP:
         raise ValueError("Whisper does not support analysis, only transcription")
     if task_type == "transcription" and provider_type == Provider.OPENROUTER:
         raise ValueError("OpenRouter does not support transcription, only analysis")
@@ -328,7 +328,7 @@ def get_ai_provider(task_type: str, config: AppConfig) -> AIProviderBase:
             raise ValueError("No Gemini API key configured")
         return GeminiProvider(api_key=config.gemini_api_key, model_config=model_config)
 
-    if provider_type == Provider.WHISPER:
+    if provider_type == Provider.WHISPER_CPP:
         return WhisperProvider(model_config=model_config)
 
     if provider_type == Provider.OPENROUTER:

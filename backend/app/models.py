@@ -87,15 +87,17 @@ class ClipMode(StrEnum):
 
 class Provider(StrEnum):
     GEMINI = "gemini"
-    WHISPER = "whisper.cpp"
+    OPENAI_COMPATIBLE = "openai-compatible"
     OPENROUTER = "openrouter"
+    WHISPER_CPP = "whisper.cpp"  # symbol renamed from WHISPER; string value unchanged
 
     @property
     def label(self) -> str:
         labels = {
             Provider.GEMINI: "Gemini",
-            Provider.WHISPER: "Whisper.cpp",
+            Provider.OPENAI_COMPATIBLE: "OpenAI-compatible",
             Provider.OPENROUTER: "OpenRouter",
+            Provider.WHISPER_CPP: "Whisper.cpp",
         }
         return labels[self]
 
@@ -121,9 +123,48 @@ class ClippingStatus(StrEnum):
 
 
 PRESET_MODELS = {
-    "gemini-2.5-flash": {"provider": Provider.GEMINI, "label": "Gemini 2.5 Flash"},
-    "gemini-2.5-flash-lite": {"provider": Provider.GEMINI, "label": "Gemini 2.5 Flash Lite"},
-    "whisper.cpp": {"provider": Provider.WHISPER, "label": "Whisper.cpp"},
+    "gemini-2.5-flash": {
+        "provider": Provider.GEMINI,
+        "label": "Gemini 2.5 Flash",
+        "transcription": True,
+        "analysis": True,
+        "recommended": True,
+    },
+    "gemini-2.5-flash-lite": {
+        "provider": Provider.GEMINI,
+        "label": "Gemini 2.5 Flash Lite",
+        "transcription": True,
+        "analysis": False,
+        "recommended": False,
+    },
+    "gpt-4.1-mini": {
+        "provider": Provider.OPENAI_COMPATIBLE,
+        "label": "GPT-4.1 mini",
+        "transcription": False,
+        "analysis": True,
+        "recommended": True,
+    },
+    "gpt-4o-mini-transcribe": {
+        "provider": Provider.OPENAI_COMPATIBLE,
+        "label": "GPT-4o mini transcribe",
+        "transcription": True,
+        "analysis": False,
+        "recommended": True,
+    },
+    "google/gemini-2.5-flash": {
+        "provider": Provider.OPENROUTER,
+        "label": "Gemini 2.5 Flash (via OpenRouter)",
+        "transcription": False,
+        "analysis": True,
+        "recommended": True,
+    },
+    "whisper.cpp": {
+        "provider": Provider.WHISPER_CPP,
+        "label": "Whisper.cpp",
+        "transcription": True,
+        "analysis": False,
+        "recommended": True,
+    },
 }
 
 
@@ -147,6 +188,11 @@ class AIModel(SQLModel, table=True):
     provider: str = Field(max_length=20)
     host: str = Field(default="")
     is_preset: bool = Field(default=False)
+    api_key: str = Field(default="")
+    base_url: str = Field(default="")
+    supports_transcription: bool = Field(default=False)
+    supports_analysis: bool = Field(default=False)
+    is_recommended: bool = Field(default=False)
     input_price: float = Field(default=0)
     output_price: float = Field(default=0)
 
@@ -461,8 +507,12 @@ class PodcastShowUpdate(PydanticBaseModel):
 class ConfigRead(PydanticBaseModel):
     transcription_model_id: str | None
     analysis_model_id: str | None
+<<<<<<< HEAD
     gemini_api_key: str
     openrouter_api_key: str
+=======
+    gemini_api_key: str = ""
+>>>>>>> cbd6df5 (feat: extend AI model schema with provider taxonomy and capability fields)
     identify_ads_in_acast_breaks: bool = False
     transcription_model: "AIModelRead | None" = None
     analysis_model: "AIModelRead | None" = None
@@ -471,8 +521,12 @@ class ConfigRead(PydanticBaseModel):
 class ConfigUpdate(PydanticBaseModel):
     transcription_model_id: str | None = None
     analysis_model_id: str | None = None
+<<<<<<< HEAD
     gemini_api_key: str | None = None
     openrouter_api_key: str | None = None
+=======
+    gemini_api_key: str | None = None  # deprecated, accepted but ignored
+>>>>>>> cbd6df5 (feat: extend AI model schema with provider taxonomy and capability fields)
     identify_ads_in_acast_breaks: bool | None = None
 
 
@@ -481,9 +535,14 @@ class AIModelRead(PydanticBaseModel):
     name: str
     provider: str
     host: str
+    api_key: str = ""
+    base_url: str = ""
     is_preset: bool
     input_price: float
     output_price: float
+    supports_transcription: bool = False
+    supports_analysis: bool = False
+    is_recommended: bool = False
     display_name: str = ""
 
 
@@ -491,6 +550,26 @@ class AIModelCreate(PydanticBaseModel):
     name: str
     provider: str
     host: str = ""
+    api_key: str = ""
+    base_url: str = ""
+    supports_transcription: bool = False
+    supports_analysis: bool = False
+
+
+class AIModelUpdate(PydanticBaseModel):
+    name: str | None = None
+    api_key: str | None = None
+    base_url: str | None = None
+    supports_transcription: bool | None = None
+    supports_analysis: bool | None = None
+    input_price: float | None = None
+    output_price: float | None = None
+
+
+class ModelTestResult(PydanticBaseModel):
+    ok: bool
+    message: str
+    latency_ms: int
 
 
 class ClippingReportRead(PydanticBaseModel):
