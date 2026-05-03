@@ -1,6 +1,3 @@
-import pytest
-
-
 def test_get_config(client):
     response = client.get("/api/config")
     assert response.status_code == 200
