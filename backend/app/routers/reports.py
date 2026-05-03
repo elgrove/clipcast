@@ -23,9 +23,7 @@ def list_reports(
     session: Session = Depends(get_session),
 ):
     reports = session.exec(
-        select(ClippingReport)
-        .order_by(ClippingReport.queued_at.desc())
-        .limit(limit)
+        select(ClippingReport).order_by(ClippingReport.queued_at.desc()).limit(limit)
     ).all()
 
     results = []

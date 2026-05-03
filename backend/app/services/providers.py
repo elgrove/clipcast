@@ -51,10 +51,16 @@ class AIProviderBase(ABC):
 
     def calculate_cost(self, input_tokens, output_tokens, model_config: AIModel):
         input_cost = (
-            Decimal(input_tokens) / Decimal(1_000_000) * Decimal(str(model_config.input_price)) / Decimal(100)
+            Decimal(input_tokens)
+            / Decimal(1_000_000)
+            * Decimal(str(model_config.input_price))
+            / Decimal(100)
         )
         output_cost = (
-            Decimal(output_tokens) / Decimal(1_000_000) * Decimal(str(model_config.output_price)) / Decimal(100)
+            Decimal(output_tokens)
+            / Decimal(1_000_000)
+            * Decimal(str(model_config.output_price))
+            / Decimal(100)
         )
         return float(input_cost + output_cost)
 
