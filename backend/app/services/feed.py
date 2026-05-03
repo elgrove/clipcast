@@ -1,4 +1,5 @@
 import logging
+from datetime import timezone
 
 from feedgen.feed import FeedGenerator
 from sqlmodel import Session, select
@@ -21,7 +22,7 @@ def generate_podcast_feed(session: Session, podcast: PodcastShow, base_url: str)
     fg.podcast.itunes_category("Technology")
 
     if podcast.image_path.exists():
-        image_url = f"{base_url}/podcast/{podcast.id}/image/"
+        image_url = f"{base_url}/podcasts/{podcast.id}/image.jpg"
         fg.image(url=image_url, title=podcast.title, link=image_url)
         fg.podcast.itunes_image(image_url)
 
@@ -47,10 +48,11 @@ def generate_podcast_feed(session: Session, podcast: PodcastShow, base_url: str)
         fe.description(episode.description or "")
 
         if episode.published_at:
-            fe.published(episode.published_at)
-            fe.updated(episode.published_at)
+            pub = episode.published_at.replace(tzinfo=timezone.utc) if episode.published_at.tzinfo is None else episode.published_at
+            fe.published(pub)
+            fe.updated(pub)
 
-        audio_url = f"{base_url}/podcast/{podcast.id}/episode/{episode.id}/audio/"
+        audio_url = f"{base_url}/podcasts/{podcast.id}/episode/{episode.id}/audio"
         file_size = episode.mp3_path.stat().st_size
         fe.enclosure(url=audio_url, length=str(file_size), type="audio/mpeg")
 

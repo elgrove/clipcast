@@ -11,6 +11,7 @@ class Settings(BaseSettings):
     allowed_origins: list[str] = ["*"]
     celery_workers: int = 2
     frontend_dir: str = "static/frontend"
+    external_url: str = ""
 
     @property
     def database_url(self) -> str:

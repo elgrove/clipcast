@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import FileResponse, Response
 from sqlmodel import Session, select
 
+from app.config import settings
 from app.database import get_session
 from app.models import PodcastShow
 from app.services.feed import generate_podcast_feed
@@ -19,11 +20,12 @@ def podcast_feed(
     if not podcast:
         raise HTTPException(status_code=404, detail="Podcast not found")
 
-    base_url = str(request.base_url).rstrip("/")
+    base_url = settings.external_url or str(request.base_url).rstrip("/")
     feed_xml = generate_podcast_feed(session, podcast, base_url)
     return Response(content=feed_xml, media_type="application/rss+xml")
 
 
+@router.get("/podcasts/{podcast_id}/image.jpg")
 @router.get("/podcasts/{podcast_id}/image")
 def podcast_image(podcast_id: str, session: Session = Depends(get_session)):
     podcast = session.get(PodcastShow, podcast_id)

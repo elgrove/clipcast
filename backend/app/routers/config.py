@@ -1,10 +1,11 @@
 import logging
 from io import BytesIO
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Request
 from fastapi.responses import Response
 from sqlmodel import Session, select
 
+from app.config import settings
 from app.database import get_session
 from app.models import (
     AIModel,
@@ -85,12 +86,14 @@ def create_model(data: AIModelCreate, session: Session = Depends(get_session)):
     return _ai_model_to_read(model)
 
 
-@router.post("/config/export-opml")
+@router.get("/config/export-opml")
 def export_opml(
+    request: Request,
     feed_type: str = "clipcast",
     session: Session = Depends(get_session),
 ):
     podcasts = session.exec(select(PodcastShow)).all()
+    base_url = settings.external_url or str(request.base_url).rstrip("/")
 
     opml = BytesIO()
     opml.write(b'<?xml version="1.0" encoding="UTF-8"?>\n')
@@ -99,7 +102,7 @@ def export_opml(
     opml.write(b"  <body>\n")
 
     for podcast in podcasts:
-        url = f"/feed/{podcast.itunes_id}" if feed_type == "clipcast" else podcast.source_rss_url
+        url = f"{base_url}/feed/{podcast.itunes_id}" if feed_type == "clipcast" else podcast.source_rss_url
         title = podcast.title.replace("&", "&amp;").replace('"', "&quot;")
         opml.write(f'    <outline text="{title}" xmlUrl="{url}" type="rss" />\n'.encode())
 
