@@ -121,7 +121,55 @@ test.describe('Add Podcast page', () => {
 });
 
 test.describe('Config page', () => {
-	test('shows configuration form', async ({ page }) => {
+	const mockModels = [
+		{
+			id: 'm1',
+			name: 'gemini-2.5-flash',
+			provider: 'gemini',
+			host: '',
+			api_key: '',
+			base_url: '',
+			is_preset: true,
+			input_price: 0,
+			output_price: 0,
+			supports_transcription: true,
+			supports_analysis: true,
+			is_recommended: true,
+			display_name: 'Gemini 2.5 Flash',
+		},
+		{
+			id: 'm2',
+			name: 'whisper.cpp',
+			provider: 'whisper.cpp',
+			host: '',
+			api_key: '',
+			base_url: '',
+			is_preset: true,
+			input_price: 0,
+			output_price: 0,
+			supports_transcription: true,
+			supports_analysis: false,
+			is_recommended: true,
+			display_name: 'Whisper.cpp',
+		},
+		{
+			id: 'm3',
+			name: 'google/gemini-2.5-flash',
+			provider: 'openrouter',
+			host: '',
+			api_key: '',
+			base_url: '',
+			is_preset: true,
+			input_price: 0,
+			output_price: 0,
+			supports_transcription: false,
+			supports_analysis: true,
+			is_recommended: true,
+			display_name: 'Gemini 2.5 Flash (via OpenRouter)',
+		},
+	];
+
+	test('shows config page with model library', async ({ page }) => {
 		await page.route('**/api/config', (route) => {
 			return route.fulfill({
 				status: 200,
@@ -129,7 +177,6 @@ test.describe('Config page', () => {
 				body: JSON.stringify({
 					transcription_model_id: null,
 					analysis_model_id: null,
-					gemini_api_key: '',
 					transcription_model: null,
 					analysis_model: null,
 				}),
@@ -137,39 +184,57 @@ test.describe('Config page', () => {
 		});
 
 		await page.route('**/api/models', (route) => {
-			return route.fulfill({
-				status: 200,
-				contentType: 'application/json',
-				body: JSON.stringify([
-					{
-						id: 'm1',
-						name: 'gemini-2.5-flash',
-						provider: 'gemini',
-						host: '',
-						is_preset: true,
-						input_price: 0,
-						output_price: 0,
-						display_name: 'Gemini 2.5 Flash',
-					},
-					{
-						id: 'm2',
-						name: 'whisper.cpp',
-						provider: 'whisper.cpp',
-						host: '',
-						is_preset: true,
-						input_price: 0,
-						output_price: 0,
-						display_name: 'Whisper.cpp',
-					},
-				]),
-			});
+			if (route.request().method() === 'GET') {
+				return route.fulfill({
+					status: 200,
+					contentType: 'application/json',
+					body: JSON.stringify(mockModels),
+				});
+			}
+		});
+
+		await page.route('**/api/podcasts', (route) => {
+			return route.fulfill({ status: 200, body: JSON.stringify([]) });
 		});
 
 		await page.goto('/config');
-		await expect(page.getByText(/gemini api key/i)).toBeVisible();
-		await expect(page.getByText(/transcription model/i)).toBeVisible();
-		await expect(page.getByText(/analysis model/i)).toBeVisible();
+		await expect(page.getByText('Active Models')).toBeVisible();
+		await expect(page.getByText('Model Library')).toBeVisible();
+		await expect(page.getByText('Gemini 2.5 Flash')).toBeVisible();
+		await expect(page.getByText('Whisper.cpp')).toBeVisible();
 		await page.screenshot({ path: 'tests/screenshots/06-config-page.png' });
+	});
+
+	test('shows add model modal', async ({ page }) => {
+		await page.route('**/api/config', (route) => {
+			return route.fulfill({
+				status: 200,
+				contentType: 'application/json',
+				body: JSON.stringify({
+					transcription_model_id: null,
+					analysis_model_id: null,
+					transcription_model: null,
+					analysis_model: null,
+				}),
+			});
+		});
+		await page.route('**/api/models', (route) => {
+			if (route.request().method() === 'GET') {
+				return route.fulfill({ status: 200, body: JSON.stringify(mockModels) });
+			}
+		});
+		await page.route('**/api/podcasts', (route) => {
+			return route.fulfill({ status: 200, body: JSON.stringify([]) });
+		});
+
+		await page.goto('/config');
+		await page.getByRole('button', { name: 'Add' }).click();
+		await expect(page.getByText('Add a model')).toBeVisible();
+		await expect(page.getByText('Gemini')).toBeVisible();
+		await expect(page.getByText('OpenAI-compatible')).toBeVisible();
+		await expect(page.getByText('OpenRouter')).toBeVisible();
+		await expect(page.getByText('Whisper.cpp')).toBeVisible();
+		await page.screenshot({ path: 'tests/screenshots/06b-config-add-modal.png' });
 	});
 });
 
