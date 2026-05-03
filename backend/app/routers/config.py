@@ -1,8 +1,11 @@
 import logging
+import time
 from io import BytesIO
 
-from fastapi import APIRouter, Depends, Request
+import requests
+from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import Response
+from openai import OpenAI
 from sqlmodel import Session, select
 
 from app.config import settings
@@ -11,10 +14,13 @@ from app.models import (
     AIModel,
     AIModelCreate,
     AIModelRead,
+    AIModelUpdate,
     AppConfig,
     ConfigRead,
     ConfigUpdate,
+    ModelTestResult,
     PodcastShow,
+    Provider,
 )
 
 logger = logging.getLogger("clipcast")
@@ -27,9 +33,14 @@ def _ai_model_to_read(model: AIModel) -> AIModelRead:
         name=model.name,
         provider=model.provider,
         host=model.host,
+        api_key=model.api_key,
+        base_url=model.base_url,
         is_preset=model.is_preset,
         input_price=model.input_price,
         output_price=model.output_price,
+        supports_transcription=model.supports_transcription,
+        supports_analysis=model.supports_analysis,
+        is_recommended=model.is_recommended,
         display_name=str(model),
     )
 
@@ -54,11 +65,28 @@ def get_config(session: Session = Depends(get_session)):
 def update_config(data: ConfigUpdate, session: Session = Depends(get_session)):
     config = session.get(AppConfig, "config")
     if data.transcription_model_id is not None:
-        config.transcription_model_id = data.transcription_model_id
+        if data.transcription_model_id != "":
+            model = session.get(AIModel, data.transcription_model_id)
+            if not model:
+                raise HTTPException(status_code=422, detail="Transcription model not found")
+            if not model.supports_transcription:
+                raise HTTPException(
+                    status_code=422,
+                    detail=f"Model '{model.name}' does not support transcription",
+                )
+        config.transcription_model_id = data.transcription_model_id or None
     if data.analysis_model_id is not None:
-        config.analysis_model_id = data.analysis_model_id
-    if data.gemini_api_key is not None:
-        config.gemini_api_key = data.gemini_api_key
+        if data.analysis_model_id != "":
+            model = session.get(AIModel, data.analysis_model_id)
+            if not model:
+                raise HTTPException(status_code=422, detail="Analysis model not found")
+            if not model.supports_analysis:
+                raise HTTPException(
+                    status_code=422,
+                    detail=f"Model '{model.name}' does not support analysis",
+                )
+        config.analysis_model_id = data.analysis_model_id or None
+    # gemini_api_key accepted but ignored (deprecated)
     session.add(config)
     session.commit()
     session.refresh(config)
@@ -78,12 +106,79 @@ def create_model(data: AIModelCreate, session: Session = Depends(get_session)):
         name=data.name,
         provider=data.provider,
         host=data.host,
+        api_key=data.api_key,
+        base_url=data.base_url or data.host,
+        supports_transcription=data.supports_transcription,
+        supports_analysis=data.supports_analysis,
     )
     session.add(model)
     session.commit()
     session.refresh(model)
     logger.info("Custom model created: %s", model.name)
     return _ai_model_to_read(model)
+
+
+@router.put("/models/{model_id}", response_model=AIModelRead)
+def update_model(model_id: str, data: AIModelUpdate, session: Session = Depends(get_session)):
+    model = session.get(AIModel, model_id)
+    if not model:
+        raise HTTPException(status_code=404, detail="Model not found")
+    for field, value in data.model_dump(exclude_none=True).items():
+        setattr(model, field, value)
+    session.add(model)
+    session.commit()
+    session.refresh(model)
+    return _ai_model_to_read(model)
+
+
+@router.delete("/models/{model_id}", status_code=204)
+def delete_model(model_id: str, session: Session = Depends(get_session)):
+    model = session.get(AIModel, model_id)
+    if not model:
+        raise HTTPException(status_code=404, detail="Model not found")
+    session.delete(model)
+    session.commit()
+
+
+@router.post("/models/{model_id}/test", response_model=ModelTestResult)
+def test_model(model_id: str, session: Session = Depends(get_session)):
+    model = session.get(AIModel, model_id)
+    if not model:
+        raise HTTPException(status_code=404, detail="Model not found")
+
+    provider = Provider(model.provider)
+    start = time.monotonic()
+
+    try:
+        if provider == Provider.GEMINI:
+            from google import genai
+
+            client = genai.Client(api_key=model.api_key)
+            list(client.models.list())
+        elif provider in (Provider.OPENAI_COMPATIBLE, Provider.OPENROUTER):
+            from app.services.providers import OpenAICompatibleProvider
+
+            base_url = model.base_url or OpenAICompatibleProvider.DEFAULT_BASE_URLS.get(provider)
+            if not base_url:
+                raise ValueError("base_url required for this provider")
+            client = OpenAI(api_key=model.api_key, base_url=base_url)
+            client.models.list()
+        elif provider == Provider.WHISPER_CPP:
+            base_url = (model.base_url or model.host or "").rstrip("/")
+            if not base_url:
+                raise ValueError("No Whisper URL configured")
+            resp = requests.get(f"{base_url}/health", timeout=10)
+            if resp.status_code != 200:
+                raise ConnectionError(f"Whisper server unhealthy: HTTP {resp.status_code}")
+        else:
+            raise ValueError(f"Unknown provider: {provider}")
+
+        latency_ms = int((time.monotonic() - start) * 1000)
+        return ModelTestResult(ok=True, message="Connected successfully", latency_ms=latency_ms)
+
+    except Exception as e:
+        latency_ms = int((time.monotonic() - start) * 1000)
+        return ModelTestResult(ok=False, message=str(e), latency_ms=latency_ms)
 
 
 @router.get("/config/export-opml")

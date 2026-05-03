@@ -8,6 +8,7 @@ from pathlib import Path
 import requests
 from google import genai
 from google.genai import types
+from openai import OpenAI
 from pydantic import BaseModel as PydanticBaseModel
 
 from app.models import (
@@ -165,10 +166,10 @@ class WhisperProvider(AIProviderBase):
             raise ConnectionError(f"Whisper server unreachable at {base_url}: {e}") from e
 
     def transcribe(self, audio_path: Path, report: TranscriptionReport = None) -> Transcription:
-        if not self.model_config.host:
-            raise ValueError("No Whisper host configured for this model")
+        base_url = (self.model_config.base_url or self.model_config.host or "").rstrip("/")
+        if not base_url:
+            raise ValueError("No Whisper URL configured for this model")
 
-        base_url = self.model_config.host.rstrip("/")
         self._check_health(base_url)
         logger.info("Transcribing with Whisper at %s (file: %s)", base_url, audio_path.name)
 
@@ -202,6 +203,76 @@ class WhisperProvider(AIProviderBase):
         raise NotImplementedError("WhisperProvider only supports transcription, not analysis")
 
 
+class OpenAICompatibleProvider(AIProviderBase):
+    DEFAULT_BASE_URLS = {
+        Provider.OPENROUTER: "https://openrouter.ai/api/v1",
+    }
+
+    def __init__(self, model_config: AIModel):
+        self.model_config = model_config
+        provider = Provider(model_config.provider)
+        base_url = model_config.base_url or self.DEFAULT_BASE_URLS.get(provider)
+        if not base_url:
+            raise ValueError(f"base_url required for provider {provider}")
+        self.client = OpenAI(api_key=model_config.api_key, base_url=base_url)
+
+    @staticmethod
+    def _strip_code_fences(text: str) -> str:
+        text = text.strip()
+        if text.startswith("```"):
+            text = re.sub(r"^```(?:json)?\n?", "", text)
+            text = re.sub(r"\n?```$", "", text)
+        return text
+
+    def transcribe(self, audio_path: Path, report: TranscriptionReport = None) -> Transcription:
+        if Provider(self.model_config.provider) == Provider.OPENROUTER:
+            raise NotImplementedError("OpenRouter does not support audio transcription")
+        logger.info("Transcribing with OpenAI-compatible model %s", self.model_config.name)
+        with open(audio_path, "rb") as audio_file:
+            response = self.client.audio.transcriptions.create(
+                model=self.model_config.name,
+                file=(audio_path.name, audio_file, "audio/mpeg"),
+                response_format="verbose_json",
+                timeout=TRANSCRIPTION_TIMEOUT,
+            )
+        segments = [
+            TranscriptionSegment(
+                start_time=seg.start,
+                end_time=seg.end,
+                text=seg.text.strip(),
+            )
+            for seg in (response.segments or [])
+            if seg.text.strip()
+        ]
+        return Transcription(segments=segments)
+
+    def analyse_adverts(
+        self,
+        transcription: Transcription,
+        report: AnalysisReport = None,
+        custom_instructions: str | None = None,
+    ) -> PodcastEpisodeAdverts:
+        logger.info("Analysing adverts with OpenAI-compatible model %s", self.model_config.name)
+        transcript_json = json.dumps(transcription.model_dump(), indent=2)
+        prompt = ANALYSE_ADVERTS_PROMPT.format(transcript=transcript_json)
+        if custom_instructions:
+            prompt += f"\n\nAdditional instructions:\n{custom_instructions}"
+        response = self.client.chat.completions.create(
+            model=self.model_config.name,
+            messages=[{"role": "user", "content": prompt}],
+            response_format={"type": "json_object"},
+            timeout=ANALYSIS_TIMEOUT,
+        )
+        if report and response.usage:
+            report.input_tokens = response.usage.prompt_tokens
+            report.output_tokens = response.usage.completion_tokens
+            report.cost_usd = self.calculate_cost(
+                response.usage.prompt_tokens, response.usage.completion_tokens, self.model_config
+            )
+        text = self._strip_code_fences(response.choices[0].message.content)
+        return PodcastEpisodeAdverts.model_validate(json.loads(text))
+
+
 def get_ai_provider(task_type: str, config: AppConfig) -> AIProviderBase:
     if task_type not in ("transcription", "analysis"):
         raise ValueError(f"Invalid task_type: {task_type}. Must be 'transcription' or 'analysis'")
@@ -217,15 +288,21 @@ def get_ai_provider(task_type: str, config: AppConfig) -> AIProviderBase:
 
     provider_type = Provider(model_config.provider)
 
-    if task_type == "analysis" and provider_type == Provider.WHISPER:
-        raise ValueError("Whisper does not support analysis, only transcription")
+    if task_type == "analysis" and provider_type == Provider.WHISPER_CPP:
+        raise ValueError("Whisper.cpp does not support analysis, only transcription")
+    if task_type == "transcription" and provider_type == Provider.OPENROUTER:
+        raise ValueError("OpenRouter does not support transcription")
 
     if provider_type == Provider.GEMINI:
-        if not config.gemini_api_key:
+        api_key = model_config.api_key or config.gemini_api_key
+        if not api_key:
             raise ValueError("No Gemini API key configured")
-        return GeminiProvider(api_key=config.gemini_api_key, model_config=model_config)
+        return GeminiProvider(api_key=api_key, model_config=model_config)
 
-    if provider_type == Provider.WHISPER:
+    if provider_type in (Provider.OPENAI_COMPATIBLE, Provider.OPENROUTER):
+        return OpenAICompatibleProvider(model_config=model_config)
+
+    if provider_type == Provider.WHISPER_CPP:
         return WhisperProvider(model_config=model_config)
 
     raise ValueError(f"Unsupported provider: {provider_type}")

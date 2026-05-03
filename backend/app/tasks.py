@@ -367,7 +367,7 @@ def _get_transcription_queue(session: Session) -> str:
     if (
         config
         and config.transcription_model
-        and Provider(config.transcription_model.provider) == Provider.WHISPER
+        and Provider(config.transcription_model.provider) == Provider.WHISPER_CPP
     ):
         return "whisper"
     return "ai"
