@@ -1,37 +1,30 @@
 <script lang="ts">
-	import {
-		getConfig,
-		updateConfig,
-		getModels,
-		addModel,
-		getPodcasts,
-		exportOpml
-	} from '$lib/api';
+	import { getConfig, updateConfig, getModels, deleteModel, getPodcasts, exportOpml } from '$lib/api';
 	import { toasts, theme } from '$lib/stores';
 	import type { Config, AIModel, PodcastShow } from '$lib/types';
+	import ProviderBadge from '$lib/components/ProviderBadge.svelte';
+	import CapabilityBadge from '$lib/components/CapabilityBadge.svelte';
+	import ModelCard from '$lib/components/ModelCard.svelte';
+	import ModelFormModal from '$lib/components/ModelFormModal.svelte';
 
 	let config: Config | null = $state(null);
 	let models: AIModel[] = $state([]);
 	let podcasts: PodcastShow[] = $state([]);
 	let loading = $state(true);
-	let saving = $state(false);
 
-	let geminiApiKey = $state('');
 	let transcriptionModelId = $state('');
 	let analysisModelId = $state('');
+	let savingConfig = $state(false);
 
-	let newModelName = $state('');
-	let newModelProvider = $state('gemini');
-	let newModelHost = $state('');
-	let addingModel = $state(false);
+	let modalOpen = $state(false);
+	let editingModel: AIModel | null = $state(null);
 
 	let feedType = $state('clipcast');
-
 	let currentTheme = $state('auto');
 	theme.subscribe((v) => (currentTheme = v));
 
-	const transcriptionModels = $derived(models);
-	const analysisModels = $derived(models.filter((m) => m.provider === 'gemini'));
+	const transcriptionModels = $derived(models.filter((m) => m.supports_transcription));
+	const analysisModels = $derived(models.filter((m) => m.supports_analysis));
 
 	async function load() {
 		try {
@@ -39,7 +32,6 @@
 			config = cfg;
 			models = mdls;
 			podcasts = pods;
-			geminiApiKey = cfg.gemini_api_key || '';
 			transcriptionModelId = cfg.transcription_model_id || '';
 			analysisModelId = cfg.analysis_model_id || '';
 		} catch (e: any) {
@@ -49,40 +41,51 @@
 		}
 	}
 
-	async function handleSave() {
-		saving = true;
+	async function handleSaveConfig() {
+		savingConfig = true;
 		try {
 			config = await updateConfig({
-				gemini_api_key: geminiApiKey,
 				transcription_model_id: transcriptionModelId || null,
-				analysis_model_id: analysisModelId || null
+				analysis_model_id: analysisModelId || null,
 			});
-			toasts.addToast('success', 'Config saved');
+			transcriptionModelId = config.transcription_model_id || '';
+			analysisModelId = config.analysis_model_id || '';
+			toasts.addToast('success', 'Active models saved');
 		} catch (e: any) {
-			toasts.addToast('error', e.message || 'Failed to save config');
+			toasts.addToast('error', e.message || 'Failed to save');
 		} finally {
-			saving = false;
+			savingConfig = false;
 		}
 	}
 
-	async function handleAddModel() {
-		if (!newModelName.trim()) return;
-		addingModel = true;
+	function openAddModal() {
+		editingModel = null;
+		modalOpen = true;
+	}
+
+	function openEditModal(model: AIModel) {
+		editingModel = model;
+		modalOpen = true;
+	}
+
+	async function handleDeleteModel(model: AIModel) {
 		try {
-			const model = await addModel({
-				name: newModelName.trim(),
-				provider: newModelProvider,
-				host: newModelHost.trim()
-			});
-			models = [...models, model];
-			toasts.addToast('success', `Model "${model.display_name}" added`);
-			newModelName = '';
-			newModelHost = '';
+			await deleteModel(model.id);
+			models = models.filter((m) => m.id !== model.id);
+			toasts.addToast('success', `"${model.display_name}" deleted`);
 		} catch (e: any) {
-			toasts.addToast('error', e.message || 'Failed to add model');
-		} finally {
-			addingModel = false;
+			toasts.addToast('error', e.message || 'Failed to delete');
 		}
+	}
+
+	function handleModelSaved(model: AIModel) {
+		const idx = models.findIndex((m) => m.id === model.id);
+		if (idx >= 0) {
+			models = models.map((m) => (m.id === model.id ? model : m));
+		} else {
+			models = [...models, model];
+		}
+		toasts.addToast('success', `Model "${model.display_name}" saved`);
 	}
 
 	function handleExport() {
@@ -100,29 +103,16 @@
 		<div class="h-8 w-8 animate-spin rounded-full border-2 border-zinc-300 border-t-emerald-500"></div>
 	</div>
 {:else}
-	<div class="mx-auto max-w-2xl space-y-8">
+	<div class="mx-auto max-w-2xl space-y-6">
 		<h1 class="text-2xl font-bold text-zinc-900 dark:text-white">Configuration</h1>
 
-		<!-- API & Model Settings -->
+		<!-- Active Models -->
 		<div class="rounded-xl border border-zinc-200 bg-white p-6 dark:border-zinc-800 dark:bg-zinc-900">
-			<h2 class="text-lg font-semibold text-zinc-900 dark:text-white">Model Settings</h2>
+			<h2 class="text-lg font-semibold text-zinc-900 dark:text-white">Active Models</h2>
 			<div class="mt-4 space-y-4">
 				<div>
-					<label for="gemini-key" class="block text-sm font-medium text-zinc-700 dark:text-zinc-300">
-						Gemini API Key
-					</label>
-					<input
-						id="gemini-key"
-						type="password"
-						bind:value={geminiApiKey}
-						placeholder="Enter your Gemini API key"
-						class="mt-1 w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500/20 dark:border-zinc-700 dark:bg-zinc-800 dark:text-white dark:placeholder-zinc-500"
-					/>
-				</div>
-
-				<div>
 					<label for="transcription-model" class="block text-sm font-medium text-zinc-700 dark:text-zinc-300">
-						Transcription Model
+						Transcription
 					</label>
 					<select
 						id="transcription-model"
@@ -135,10 +125,9 @@
 						{/each}
 					</select>
 				</div>
-
 				<div>
 					<label for="analysis-model" class="block text-sm font-medium text-zinc-700 dark:text-zinc-300">
-						Analysis Model
+						Analysis
 					</label>
 					<select
 						id="analysis-model"
@@ -150,75 +139,61 @@
 							<option value={model.id}>{model.display_name}</option>
 						{/each}
 					</select>
-					<p class="mt-1 text-xs text-zinc-500 dark:text-zinc-400">Only Gemini models are shown for analysis</p>
 				</div>
 
-				<div class="pt-2">
+				<!-- Whisper.cpp guidance -->
+				<div class="flex gap-2 rounded-lg bg-zinc-50 p-3 text-xs text-zinc-500 dark:bg-zinc-800/50 dark:text-zinc-400">
+					<svg class="mt-0.5 h-4 w-4 shrink-0 text-zinc-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+						<circle cx="12" cy="12" r="10" /><path stroke-linecap="round" d="M12 8v4m0 4h.01" />
+					</svg>
+					<p>
+						If your library averages 5 or fewer new episodes per day, a local
+						<a href="#model-library" class="underline">Whisper.cpp</a> server (free, runs on your hardware) will easily keep up —
+						and analysis still runs on a cloud LLM.
+					</p>
+				</div>
+
+				<div class="pt-1">
 					<button
-						onclick={handleSave}
-						disabled={saving}
+						onclick={handleSaveConfig}
+						disabled={savingConfig}
 						class="inline-flex items-center gap-2 rounded-lg bg-emerald-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-emerald-700 disabled:opacity-50"
 					>
-						{#if saving}
+						{#if savingConfig}
 							<div class="h-4 w-4 animate-spin rounded-full border-2 border-white/30 border-t-white"></div>
 						{/if}
-						Save Settings
+						Save
 					</button>
 				</div>
 			</div>
 		</div>
 
-		<!-- Add Custom Model -->
-		<div class="rounded-xl border border-zinc-200 bg-white p-6 dark:border-zinc-800 dark:bg-zinc-900">
-			<h2 class="text-lg font-semibold text-zinc-900 dark:text-white">Add Custom Model</h2>
-			<div class="mt-4 space-y-4">
-				<div>
-					<label for="model-name" class="block text-sm font-medium text-zinc-700 dark:text-zinc-300">
-						Model Name
-					</label>
-					<input
-						id="model-name"
-						type="text"
-						bind:value={newModelName}
-						placeholder="e.g. my-whisper-instance"
-						class="mt-1 w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500/20 dark:border-zinc-700 dark:bg-zinc-800 dark:text-white dark:placeholder-zinc-500"
-					/>
-				</div>
-				<div>
-					<label for="model-provider" class="block text-sm font-medium text-zinc-700 dark:text-zinc-300">
-						Provider
-					</label>
-					<select
-						id="model-provider"
-						bind:value={newModelProvider}
-						class="mt-1 w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm outline-none focus:border-emerald-500 dark:border-zinc-700 dark:bg-zinc-800 dark:text-white"
-					>
-						<option value="gemini">Gemini</option>
-						<option value="whisper.cpp">Whisper.cpp</option>
-					</select>
-				</div>
-				<div>
-					<label for="model-host" class="block text-sm font-medium text-zinc-700 dark:text-zinc-300">
-						Host URL
-					</label>
-					<input
-						id="model-host"
-						type="text"
-						bind:value={newModelHost}
-						placeholder="e.g. http://localhost:8080"
-						class="mt-1 w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500/20 dark:border-zinc-700 dark:bg-zinc-800 dark:text-white dark:placeholder-zinc-500"
-					/>
-				</div>
+		<!-- Model Library -->
+		<div id="model-library" class="rounded-xl border border-zinc-200 bg-white p-6 dark:border-zinc-800 dark:bg-zinc-900">
+			<div class="flex items-center justify-between">
+				<h2 class="text-lg font-semibold text-zinc-900 dark:text-white">Model Library</h2>
 				<button
-					onclick={handleAddModel}
-					disabled={addingModel || !newModelName.trim()}
-					class="inline-flex items-center gap-2 rounded-lg bg-zinc-200 px-4 py-2 text-sm font-medium text-zinc-700 transition-colors hover:bg-zinc-300 disabled:opacity-50 dark:bg-zinc-800 dark:text-zinc-300 dark:hover:bg-zinc-700"
+					onclick={openAddModal}
+					class="inline-flex items-center gap-1.5 rounded-lg bg-emerald-600 px-3 py-1.5 text-sm font-medium text-white transition-colors hover:bg-emerald-700"
 				>
-					{#if addingModel}
-						<div class="h-4 w-4 animate-spin rounded-full border-2 border-zinc-400 border-t-zinc-700 dark:border-zinc-600 dark:border-t-zinc-300"></div>
-					{/if}
-					Add Model
+					<svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+						<path stroke-linecap="round" stroke-linejoin="round" d="M12 4v16m8-8H4" />
+					</svg>
+					Add
 				</button>
+			</div>
+			<div class="mt-4 space-y-3">
+				{#if models.length === 0}
+					<p class="text-sm text-zinc-500 dark:text-zinc-400">No models yet. Click Add to get started.</p>
+				{:else}
+					{#each models as model (model.id)}
+						<ModelCard
+							{model}
+							onEdit={openEditModal}
+							onDelete={handleDeleteModel}
+						/>
+					{/each}
+				{/if}
 			</div>
 		</div>
 
@@ -293,3 +268,9 @@
 		</div>
 	</div>
 {/if}
+
+<ModelFormModal
+	bind:open={modalOpen}
+	editModel={editingModel}
+	onSaved={handleModelSaved}
+/>

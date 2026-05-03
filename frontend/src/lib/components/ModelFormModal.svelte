@@ -193,10 +193,11 @@
                 <!-- Model name (hidden for whisper.cpp) -->
                 {#if provider !== 'whisper.cpp'}
                     <div>
-                        <label class="block text-sm font-medium text-zinc-700 dark:text-zinc-300">
+                        <label for="modal-model-name" class="block text-sm font-medium text-zinc-700 dark:text-zinc-300">
                             Model name
                         </label>
                         <input
+                            id="modal-model-name"
                             type="text"
                             bind:value={modelName}
                             disabled={!!editModel}
@@ -209,10 +210,11 @@
                 <!-- API key (hidden for whisper.cpp) -->
                 {#if provider !== 'whisper.cpp'}
                     <div>
-                        <label class="block text-sm font-medium text-zinc-700 dark:text-zinc-300">
+                        <label for="modal-api-key" class="block text-sm font-medium text-zinc-700 dark:text-zinc-300">
                             API key <span class="font-normal text-zinc-400">(saved per model)</span>
                         </label>
                         <input
+                            id="modal-api-key"
                             type="password"
                             bind:value={apiKey}
                             placeholder="sk-..."
@@ -224,10 +226,11 @@
                 <!-- Base URL (shown for openai-compatible and whisper.cpp) -->
                 {#if provider === 'openai-compatible' || provider === 'whisper.cpp'}
                     <div>
-                        <label class="block text-sm font-medium text-zinc-700 dark:text-zinc-300">
+                        <label for="modal-base-url" class="block text-sm font-medium text-zinc-700 dark:text-zinc-300">
                             {provider === 'whisper.cpp' ? 'Host URL' : 'Base URL'}
                         </label>
                         <input
+                            id="modal-base-url"
                             type="text"
                             bind:value={baseUrl}
                             placeholder={provider === 'whisper.cpp' ? 'http://localhost:8080' : 'https://api.openai.com/v1'}
