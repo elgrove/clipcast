@@ -43,7 +43,7 @@ export interface EpisodeListResponse {
 export interface Config {
 	transcription_model_id: string | null;
 	analysis_model_id: string | null;
-	gemini_api_key: string;
+	gemini_api_key?: string;
 	transcription_model: AIModel | null;
 	analysis_model: AIModel | null;
 }
@@ -53,10 +53,21 @@ export interface AIModel {
 	name: string;
 	provider: string;
 	host: string;
+	api_key: string;
+	base_url: string;
 	is_preset: boolean;
 	input_price: number;
 	output_price: number;
+	supports_transcription: boolean;
+	supports_analysis: boolean;
+	is_recommended: boolean;
 	display_name: string;
+}
+
+export interface TestResult {
+	ok: boolean;
+	message: string;
+	latency_ms: number;
 }
 
 export interface ClippingReport {

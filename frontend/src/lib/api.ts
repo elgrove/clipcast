@@ -4,6 +4,7 @@ import type {
 	EpisodeListResponse,
 	Config,
 	AIModel,
+	TestResult,
 	ClippingReport,
 	ClippingReportDetail,
 	ITunesSearchResult
@@ -143,7 +144,6 @@ export async function updateConfig(
 	data: Partial<{
 		transcription_model_id: string | null;
 		analysis_model_id: string | null;
-		gemini_api_key: string;
 	}>
 ): Promise<Config> {
 	return fetchApi<Config>('/api/config', {
@@ -160,11 +160,41 @@ export async function addModel(data: {
 	name: string;
 	provider: string;
 	host?: string;
+	api_key?: string;
+	base_url?: string;
+	supports_transcription?: boolean;
+	supports_analysis?: boolean;
 }): Promise<AIModel> {
 	return fetchApi<AIModel>('/api/models', {
 		method: 'POST',
 		body: JSON.stringify(data)
 	});
+}
+
+export async function updateModel(
+	id: string,
+	data: {
+		name?: string;
+		api_key?: string;
+		base_url?: string;
+		supports_transcription?: boolean;
+		supports_analysis?: boolean;
+		input_price?: number;
+		output_price?: number;
+	}
+): Promise<AIModel> {
+	return fetchApi<AIModel>(`/api/models/${id}`, {
+		method: 'PUT',
+		body: JSON.stringify(data)
+	});
+}
+
+export async function deleteModel(id: string): Promise<void> {
+	return fetchApi<void>(`/api/models/${id}`, { method: 'DELETE' });
+}
+
+export async function testModel(id: string): Promise<TestResult> {
+	return fetchApi<TestResult>(`/api/models/${id}/test`, { method: 'POST' });
 }
 
 export async function searchItunes(query: string): Promise<ITunesSearchResult[]> {
