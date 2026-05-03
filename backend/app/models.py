@@ -507,12 +507,8 @@ class PodcastShowUpdate(PydanticBaseModel):
 class ConfigRead(PydanticBaseModel):
     transcription_model_id: str | None
     analysis_model_id: str | None
-<<<<<<< HEAD
-    gemini_api_key: str
-    openrouter_api_key: str
-=======
     gemini_api_key: str = ""
->>>>>>> cbd6df5 (feat: extend AI model schema with provider taxonomy and capability fields)
+    openrouter_api_key: str = ""
     identify_ads_in_acast_breaks: bool = False
     transcription_model: "AIModelRead | None" = None
     analysis_model: "AIModelRead | None" = None
@@ -521,12 +517,10 @@ class ConfigRead(PydanticBaseModel):
 class ConfigUpdate(PydanticBaseModel):
     transcription_model_id: str | None = None
     analysis_model_id: str | None = None
-<<<<<<< HEAD
+    # gemini_api_key and openrouter_api_key accepted but ignored (deprecated;
+    # api keys are now stored per-model)
     gemini_api_key: str | None = None
     openrouter_api_key: str | None = None
-=======
-    gemini_api_key: str | None = None  # deprecated, accepted but ignored
->>>>>>> cbd6df5 (feat: extend AI model schema with provider taxonomy and capability fields)
     identify_ads_in_acast_breaks: bool | None = None
 
 

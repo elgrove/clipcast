@@ -121,8 +121,7 @@ def _run_migrations() -> None:
             logger.info("Added openrouter_api_key column to config")
 
         ai_model_columns = [
-            row[1]
-            for row in conn.exec_driver_sql("PRAGMA table_info(ai_models)").fetchall()
+            row[1] for row in conn.exec_driver_sql("PRAGMA table_info(ai_models)").fetchall()
         ]
         for col, defval, coltype in [
             ("api_key", "''", "VARCHAR"),
@@ -240,9 +239,7 @@ def _seed_preset_models() -> None:
         # Copy gemini_api_key into Gemini model rows
         config = session.get(AppConfig, "config")
         if config and config.gemini_api_key:
-            gemini_models = session.exec(
-                select(AIModel).where(AIModel.provider == "gemini")
-            ).all()
+            gemini_models = session.exec(select(AIModel).where(AIModel.provider == "gemini")).all()
             for m in gemini_models:
                 if not m.api_key:
                     m.api_key = config.gemini_api_key
