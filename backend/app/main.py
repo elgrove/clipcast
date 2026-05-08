@@ -19,7 +19,10 @@ logger = logging.getLogger("clipcast")
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    from app.database import init_db
+
     settings.podcasts_path.mkdir(parents=True, exist_ok=True)
+    init_db()
     logger.info("Clipcast started")
     yield
     logger.info("Clipcast shutting down")

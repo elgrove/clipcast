@@ -138,12 +138,19 @@ PRESET_MODELS = {
         "analysis": True,
         "recommended": True,
     },
-    "gpt-4o-mini-transcribe": {
+    "gpt-4o-transcribe": {
         "provider": Provider.OPENAI_COMPATIBLE,
-        "label": "GPT-4o mini transcribe",
+        "label": "GPT-4o Transcribe",
         "transcription": True,
         "analysis": False,
         "recommended": True,
+    },
+    "gpt-4o-mini-transcribe": {
+        "provider": Provider.OPENAI_COMPATIBLE,
+        "label": "GPT-4o mini Transcribe",
+        "transcription": True,
+        "analysis": False,
+        "recommended": False,
     },
     "google/gemini-2.5-flash": {
         "provider": Provider.OPENROUTER,
