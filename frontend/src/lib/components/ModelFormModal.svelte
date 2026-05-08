@@ -1,6 +1,6 @@
 <script lang="ts">
-    import type { AIModel, TestResult } from '$lib/types';
-    import { addModel, updateModel, testModelConnection } from '$lib/api';
+    import type { AIModel, Config, TestResult } from '$lib/types';
+    import { addModel, updateModel, updateConfig, testModelConnection } from '$lib/api';
 
     type Provider = 'gemini' | 'openai-compatible' | 'openrouter' | 'whisper.cpp';
 
@@ -32,7 +32,7 @@
     }: {
         open: boolean;
         editModel?: AIModel | null;
-        onSaved: (model: AIModel) => void;
+        onSaved: (model: AIModel, config?: Config) => void;
     } = $props();
 
     let provider = $state<Provider>('gemini');
@@ -90,6 +90,7 @@
         saving = true;
         try {
             let model: AIModel;
+            let newConfig: Config | undefined;
             if (editModel) {
                 model = await updateModel(editModel.id, {
                     api_key: apiKey,
@@ -106,8 +107,14 @@
                     supports_transcription: supportsTranscription,
                     supports_analysis: supportsAnalysis,
                 });
+                if (supportsTranscription || supportsAnalysis) {
+                    newConfig = await updateConfig({
+                        ...(supportsTranscription && { transcription_model_id: model.id }),
+                        ...(supportsAnalysis && { analysis_model_id: model.id }),
+                    });
+                }
             }
-            onSaved(model);
+            onSaved(model, newConfig);
             open = false;
         } catch (e: any) {
             alert(e.message || 'Failed to save model');

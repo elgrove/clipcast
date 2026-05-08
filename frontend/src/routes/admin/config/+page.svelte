@@ -78,12 +78,17 @@
 		}
 	}
 
-	function handleModelSaved(model: AIModel) {
+	function handleModelSaved(model: AIModel, newConfig?: Config) {
 		const idx = models.findIndex((m) => m.id === model.id);
 		if (idx >= 0) {
 			models = models.map((m) => (m.id === model.id ? model : m));
 		} else {
 			models = [...models, model];
+		}
+		if (newConfig) {
+			config = newConfig;
+			transcriptionModelId = newConfig.transcription_model_id || '';
+			analysisModelId = newConfig.analysis_model_id || '';
 		}
 		toasts.addToast('success', `Model "${model.display_name}" saved`);
 	}
