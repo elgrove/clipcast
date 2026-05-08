@@ -1,7 +1,6 @@
 <script lang="ts">
     import type { AIModel } from '$lib/types';
     import ProviderBadge from './ProviderBadge.svelte';
-    import CapabilityBadge from './CapabilityBadge.svelte';
     import TestConnectionButton from './TestConnectionButton.svelte';
 
     let {
@@ -28,20 +27,9 @@
         <div class="min-w-0 flex-1">
             <div class="flex flex-wrap items-center gap-2">
                 <ProviderBadge provider={model.provider} />
-                <span class="truncate font-medium text-zinc-900 dark:text-white">
+                <span class="truncate font-medium italic text-zinc-900 dark:text-white">
                     {model.display_name}
                 </span>
-                {#if model.is_recommended}
-                    <span class="text-xs text-zinc-400">⭐ recommended</span>
-                {/if}
-            </div>
-            <div class="mt-1.5 flex flex-wrap gap-1.5">
-                {#if model.supports_transcription}
-                    <CapabilityBadge type="transcription" />
-                {/if}
-                {#if model.supports_analysis}
-                    <CapabilityBadge type="analysis" />
-                {/if}
             </div>
         </div>
         <div class="flex shrink-0 items-center gap-1">
