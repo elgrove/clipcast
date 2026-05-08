@@ -136,6 +136,13 @@ PRESET_MODELS = {
         "label": "GPT-4.1 mini",
         "transcription": False,
         "analysis": True,
+        "recommended": False,
+    },
+    "gpt-5.4-mini": {
+        "provider": Provider.OPENAI_COMPATIBLE,
+        "label": "GPT-5.4 mini",
+        "transcription": False,
+        "analysis": True,
         "recommended": True,
     },
     "gpt-4o-transcribe": {

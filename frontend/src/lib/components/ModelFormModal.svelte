@@ -13,14 +13,14 @@
 
     const RECOMMENDED_MODELS: Record<Provider, string[]> = {
         'gemini':            ['gemini-2.5-flash', 'gemini-2.5-flash-lite'],
-        'openai-compatible': ['gpt-4.1-mini', 'gpt-4o-transcribe', 'gpt-4o-mini-transcribe'],
+        'openai-compatible': ['gpt-5.4-mini', 'gpt-4.1-mini', 'gpt-4o-transcribe', 'gpt-4o-mini-transcribe'],
         'openrouter':        ['google/gemini-2.5-flash'],
         'whisper.cpp':       [],
     };
 
     const DEFAULT_MODELS: Record<Provider, string> = {
         'gemini':            'gemini-2.5-flash',
-        'openai-compatible': 'gpt-4.1-mini',
+        'openai-compatible': 'gpt-5.4-mini',
         'openrouter':        'google/gemini-2.5-flash',
         'whisper.cpp':       'whisper.cpp',
     };
@@ -83,7 +83,7 @@
         testResult = null;
     }
 
-    async function handleSave() {
+    async function handleSave(closeAfter = true) {
         saving = true;
         try {
             let model: AIModel;
@@ -106,7 +106,7 @@
                 savedModelId = model.id;
             }
             onSaved(model);
-            open = false;
+            if (closeAfter) open = false;
         } catch (e: any) {
             alert(e.message || 'Failed to save model');
         } finally {
@@ -116,8 +116,8 @@
 
     async function handleTest() {
         if (!savedModelId) {
-            await handleSave();
-            return;
+            await handleSave(false); // save without closing modal
+            if (!savedModelId) return; // save failed
         }
         testing = true;
         testResult = null;
