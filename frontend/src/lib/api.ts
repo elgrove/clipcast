@@ -193,8 +193,15 @@ export async function deleteModel(id: string): Promise<void> {
 	return fetchApi<void>(`/api/models/${id}`, { method: 'DELETE' });
 }
 
-export async function testModel(id: string): Promise<TestResult> {
-	return fetchApi<TestResult>(`/api/models/${id}/test`, { method: 'POST' });
+export async function testModelConnection(data: {
+	provider: string;
+	api_key?: string;
+	base_url?: string;
+}): Promise<TestResult> {
+	return fetchApi<TestResult>('/api/models/test', {
+		method: 'POST',
+		body: JSON.stringify(data)
+	});
 }
 
 export async function searchItunes(query: string): Promise<ITunesSearchResult[]> {

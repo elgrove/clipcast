@@ -1,8 +1,8 @@
 <script lang="ts">
-    import { testModel } from '$lib/api';
+    import { testModelConnection } from '$lib/api';
     import type { TestResult } from '$lib/types';
 
-    let { modelId }: { modelId: string } = $props();
+    let { provider, apiKey, baseUrl }: { provider: string; apiKey: string; baseUrl: string } = $props();
 
     let testing = $state(false);
     let result: TestResult | null = $state(null);
@@ -11,7 +11,7 @@
         testing = true;
         result = null;
         try {
-            result = await testModel(modelId);
+            result = await testModelConnection({ provider, api_key: apiKey, base_url: baseUrl });
         } catch (e: any) {
             result = { ok: false, message: e.message || 'Test failed', latency_ms: 0 };
         } finally {

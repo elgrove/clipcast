@@ -45,7 +45,7 @@
             </div>
         </div>
         <div class="flex shrink-0 items-center gap-1">
-            <TestConnectionButton modelId={model.id} />
+            <TestConnectionButton provider={model.provider} apiKey={model.api_key} baseUrl={model.base_url} />
             <button
                 onclick={() => onEdit(model)}
                 class="rounded-md px-2 py-1.5 text-xs font-medium text-zinc-500 transition-colors hover:bg-zinc-200 hover:text-zinc-700 dark:text-zinc-400 dark:hover:bg-zinc-700 dark:hover:text-zinc-200"

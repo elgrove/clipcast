@@ -18,6 +18,7 @@ from app.models import (
     AppConfig,
     ConfigRead,
     ConfigUpdate,
+    ModelTestRequest,
     ModelTestResult,
     PodcastShow,
     Provider,
@@ -140,31 +141,27 @@ def delete_model(model_id: str, session: Session = Depends(get_session)):
     session.commit()
 
 
-@router.post("/models/{model_id}/test", response_model=ModelTestResult)
-def test_model(model_id: str, session: Session = Depends(get_session)):
-    model = session.get(AIModel, model_id)
-    if not model:
-        raise HTTPException(status_code=404, detail="Model not found")
-
-    provider = Provider(model.provider)
+@router.post("/models/test", response_model=ModelTestResult)
+def test_model_connection(data: ModelTestRequest):
+    provider = Provider(data.provider)
     start = time.monotonic()
 
     try:
         if provider == Provider.GEMINI:
             from google import genai
 
-            client = genai.Client(api_key=model.api_key)
+            client = genai.Client(api_key=data.api_key)
             list(client.models.list())
         elif provider in (Provider.OPENAI_COMPATIBLE, Provider.OPENROUTER):
             from app.services.providers import OpenAICompatibleProvider
 
-            base_url = model.base_url or OpenAICompatibleProvider.DEFAULT_BASE_URLS.get(provider)
+            base_url = data.base_url or OpenAICompatibleProvider.DEFAULT_BASE_URLS.get(provider)
             if not base_url:
                 raise ValueError("base_url required for this provider")
-            client = OpenAI(api_key=model.api_key, base_url=base_url)
-            client.models.list()
+            client = OpenAI(api_key=data.api_key, base_url=base_url)
+            list(client.models.list())
         elif provider == Provider.WHISPER_CPP:
-            base_url = (model.base_url or model.host or "").rstrip("/")
+            base_url = data.base_url.rstrip("/")
             if not base_url:
                 raise ValueError("No Whisper URL configured")
             resp = requests.get(f"{base_url}/health", timeout=10)

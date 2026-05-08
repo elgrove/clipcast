@@ -1,6 +1,6 @@
 <script lang="ts">
     import type { AIModel, TestResult } from '$lib/types';
-    import { addModel, updateModel, testModel } from '$lib/api';
+    import { addModel, updateModel, testModelConnection } from '$lib/api';
 
     type Provider = 'gemini' | 'openai-compatible' | 'openrouter' | 'whisper.cpp';
 
@@ -44,7 +44,6 @@
     let saving = $state(false);
     let testResult: TestResult | null = $state(null);
     let testing = $state(false);
-    let savedModelId: string | null = $state(null);
     let showApiKey = $state(false);
 
     const providerInfo = $derived(PROVIDER_OPTIONS.find((p) => p.value === provider)!);
@@ -58,7 +57,6 @@
                 baseUrl = editModel.base_url || '';
                 supportsTranscription = editModel.supports_transcription;
                 supportsAnalysis = editModel.supports_analysis;
-                savedModelId = editModel.id;
             } else {
                 provider = 'gemini';
                 modelName = DEFAULT_MODELS['gemini'];
@@ -66,7 +64,6 @@
                 baseUrl = '';
                 supportsTranscription = true;
                 supportsAnalysis = true;
-                savedModelId = null;
             }
             testResult = null;
             showApiKey = false;
@@ -83,7 +80,7 @@
         testResult = null;
     }
 
-    async function handleSave(closeAfter = true) {
+    async function handleSave() {
         saving = true;
         try {
             let model: AIModel;
@@ -103,10 +100,9 @@
                     supports_transcription: supportsTranscription,
                     supports_analysis: supportsAnalysis,
                 });
-                savedModelId = model.id;
             }
             onSaved(model);
-            if (closeAfter) open = false;
+            open = false;
         } catch (e: any) {
             alert(e.message || 'Failed to save model');
         } finally {
@@ -115,14 +111,10 @@
     }
 
     async function handleTest() {
-        if (!savedModelId) {
-            await handleSave(false); // save without closing modal
-            if (!savedModelId) return; // save failed
-        }
         testing = true;
         testResult = null;
         try {
-            testResult = await testModel(savedModelId);
+            testResult = await testModelConnection({ provider, api_key: apiKey, base_url: baseUrl });
         } catch (e: any) {
             testResult = { ok: false, message: e.message || 'Test failed', latency_ms: 0 };
         } finally {

@@ -147,7 +147,7 @@ def _seed_preset_models() -> None:
     from app.models import PRESET_MODELS, AIModel, AppConfig
 
     with Session(engine) as session:
-        # Backfill capability flags on existing rows
+        # Backfill capability flags on existing user-added rows using PRESET_MODELS metadata
         existing_models = session.exec(select(AIModel)).all()
         for m in existing_models:
             preset = PRESET_MODELS.get(m.name)
@@ -155,16 +155,14 @@ def _seed_preset_models() -> None:
                 m.supports_transcription = preset.get("transcription", False)
                 m.supports_analysis = preset.get("analysis", False)
                 m.is_recommended = preset.get("recommended", False)
-            elif m.provider == "gemini":
-                # Legacy custom Gemini rows default to analysis-capable
+            elif m.provider == "gemini" and not m.supports_analysis:
                 m.supports_analysis = True
-            # Backfill base_url from host for whisper.cpp rows
             if m.provider == "whisper.cpp" and not m.base_url and m.host:
                 m.base_url = m.host
             session.add(m)
         session.commit()
 
-        # Copy gemini_api_key into Gemini model rows
+        # Migrate legacy gemini_api_key into model rows
         config = session.get(AppConfig, "config")
         if config and config.gemini_api_key:
             gemini_models = session.exec(select(AIModel).where(AIModel.provider == "gemini")).all()
@@ -174,24 +172,7 @@ def _seed_preset_models() -> None:
                     session.add(m)
             session.commit()
 
-        # Insert new presets
-        for name, info in PRESET_MODELS.items():
-            existing = session.exec(select(AIModel).where(AIModel.name == name)).first()
-            if not existing:
-                model = AIModel(
-                    name=name,
-                    provider=info["provider"].value,
-                    is_preset=True,
-                    supports_transcription=info.get("transcription", False),
-                    supports_analysis=info.get("analysis", False),
-                    is_recommended=info.get("recommended", False),
-                )
-                session.add(model)
-                logger.info(f"Seeded preset model: {name}")
-        session.commit()
-
-    from app.models import AppConfig
-
+    # Ensure config singleton exists
     with Session(engine) as session:
         config = session.get(AppConfig, "config")
         if not config:

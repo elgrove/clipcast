@@ -543,6 +543,12 @@ class AIModelUpdate(PydanticBaseModel):
     output_price: float | None = None
 
 
+class ModelTestRequest(PydanticBaseModel):
+    provider: str
+    api_key: str = ""
+    base_url: str = ""
+
+
 class ModelTestResult(PydanticBaseModel):
     ok: bool
     message: str
