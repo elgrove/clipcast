@@ -41,10 +41,13 @@
     let baseUrl = $state('');
     let supportsTranscription = $state(true);
     let supportsAnalysis = $state(true);
+    const SIDECAR_URL = 'http://transcription:8998';
+
     let saving = $state(false);
     let testResult: TestResult | null = $state(null);
     let testing = $state(false);
     let showApiKey = $state(false);
+    let useSidecar = $state(false);
 
     const providerInfo = $derived(PROVIDER_OPTIONS.find((p) => p.value === provider)!);
 
@@ -67,13 +70,16 @@
             }
             testResult = null;
             showApiKey = false;
+            useSidecar = false;
         }
     });
 
     function handleProviderChange(p: Provider) {
         provider = p;
+        useSidecar = false;
         if (!editModel) {
             modelName = DEFAULT_MODELS[p];
+            baseUrl = '';
             supportsTranscription = p !== 'openrouter';
             supportsAnalysis = p !== 'whisper.cpp';
         }
@@ -232,8 +238,26 @@
                     </div>
                 {/if}
 
-                <!-- Base URL (openai-compatible and whisper.cpp) -->
-                {#if provider === 'openai-compatible' || provider === 'whisper.cpp'}
+                <!-- Sidecar checkbox (whisper.cpp only) -->
+                {#if provider === 'whisper.cpp'}
+                    <div>
+                        <label class="flex cursor-pointer items-center gap-2.5">
+                            <input
+                                type="checkbox"
+                                bind:checked={useSidecar}
+                                onchange={() => { if (useSidecar) baseUrl = SIDECAR_URL; else baseUrl = ''; }}
+                                class="h-4 w-4 rounded border-zinc-300 text-emerald-600 focus:ring-emerald-500"
+                            />
+                            <span class="text-sm text-zinc-700 dark:text-zinc-300">
+                                Using the bundled Whisper.cpp container
+                                <span class="ml-1 font-mono text-xs text-zinc-400">(transcription:8998)</span>
+                            </span>
+                        </label>
+                    </div>
+                {/if}
+
+                <!-- Base URL (openai-compatible, or whisper.cpp without sidecar) -->
+                {#if provider === 'openai-compatible' || (provider === 'whisper.cpp' && !useSidecar)}
                     <div>
                         <label for="modal-base-url" class="block text-sm font-medium text-zinc-700 dark:text-zinc-300">
                             {provider === 'whisper.cpp' ? 'Host URL' : 'Base URL'}
