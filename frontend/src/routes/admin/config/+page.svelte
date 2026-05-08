@@ -146,19 +146,7 @@
 					</select>
 				</div>
 
-				<!-- Whisper.cpp guidance -->
-				<div class="flex gap-2 rounded-lg bg-zinc-50 p-3 text-xs text-zinc-500 dark:bg-zinc-800/50 dark:text-zinc-400">
-					<svg class="mt-0.5 h-4 w-4 shrink-0 text-zinc-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-						<circle cx="12" cy="12" r="10" /><path stroke-linecap="round" d="M12 8v4m0 4h.01" />
-					</svg>
-					<p>
-						If your library averages 5 or fewer new episodes per day, a local
-						<a href="#model-library" class="underline">Whisper.cpp</a> server (free, runs on your hardware) will easily keep up —
-						and analysis still runs on a cloud LLM.
-					</p>
-				</div>
-
-				<div class="pt-1">
+<div class="pt-1">
 					<button
 						onclick={handleSaveConfig}
 						disabled={savingConfig}
