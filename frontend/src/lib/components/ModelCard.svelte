@@ -27,8 +27,8 @@
         <div class="min-w-0 flex-1">
             <div class="flex flex-wrap items-center gap-2">
                 <ProviderBadge provider={model.provider} />
-                <span class="truncate font-medium italic text-zinc-900 dark:text-white">
-                    {model.display_name}
+                <span class="truncate italic text-zinc-900 dark:text-white">
+                    {model.name}
                 </span>
             </div>
         </div>
