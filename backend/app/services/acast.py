@@ -5,7 +5,7 @@ import numpy as np
 import scipy.signal
 from pydub import AudioSegment
 
-from app.models import ACAST_ADVERT_LABEL, PodcastEpisodeAdvert
+from app.models import ACAST_ADVERT_LABEL, CutRegion
 
 IDENT_PATH = Path(__file__).parent.parent / "assets/acast_ident.wav"
 SAMPLE_RATE = 16_000
@@ -131,22 +131,20 @@ def pair_idents(
     return pairs, len(idents) - len(used)
 
 
-def idents_to_adverts(
+def idents_to_cut_regions(
     pairs: list[tuple[tuple[float, float], tuple[float, float]]],
-) -> list[PodcastEpisodeAdvert]:
-    adverts = []
+) -> list[CutRegion]:
+    regions = []
     for first, second in pairs:
         # For start-of-file pairs the sentinel first=(0,0) means no opening ident exists.
         # Cut to the start of the closing ident so it is kept as the transition sound.
         # For all other pairs, cut to the end of the closing ident (opening ident is kept).
         end_time = second[0] if first == (0.0, 0.0) else second[1]
-        adverts.append(
-            PodcastEpisodeAdvert(
+        regions.append(
+            CutRegion(
                 start_time=_format_time(first[1]),
                 end_time=_format_time(end_time),
-                advert_for=ACAST_ADVERT_LABEL,
-                front_text="",
-                tail_text="",
+                label=ACAST_ADVERT_LABEL,
             )
         )
-    return adverts
+    return regions

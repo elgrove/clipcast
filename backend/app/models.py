@@ -20,6 +20,12 @@ class PodcastEpisodeAdvert(PydanticBaseModel):
     tail_text: str
 
 
+class CutRegion(PydanticBaseModel):
+    start_time: str
+    end_time: str
+    label: str
+
+
 class TranscriptionSegment(PydanticBaseModel):
     start_time: float
     end_time: float
@@ -221,6 +227,7 @@ class PodcastEpisode(SQLModel, table=True):
     stored_filename: str = Field(default="", max_length=500)
     cleaned_at: datetime | None = Field(default=None)
     ads_json: str = Field(default="[]", sa_column=Column("ads", Text))
+    cut_regions_json: str = Field(default="[]", sa_column=Column("cut_regions", Text))
     transcription_json: str = Field(default="[]", sa_column=Column("transcription", Text))
 
     podcast: PodcastShow = Relationship(back_populates="episodes")
@@ -237,6 +244,19 @@ class PodcastEpisode(SQLModel, table=True):
         import json
 
         self.ads_json = json.dumps([a.model_dump() for a in value])
+
+    @property
+    def cut_regions(self) -> list[CutRegion]:
+        import json
+
+        raw = json.loads(self.cut_regions_json)
+        return [CutRegion(**c) for c in raw]
+
+    @cut_regions.setter
+    def cut_regions(self, value: list[CutRegion]) -> None:
+        import json
+
+        self.cut_regions_json = json.dumps([c.model_dump() for c in value])
 
     @property
     def transcription(self) -> list[TranscriptionSegment]:

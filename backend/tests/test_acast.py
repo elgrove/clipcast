@@ -10,7 +10,7 @@ from app.services.acast import (
     SAMPLE_RATE,
     acast_feed_url_heuristic,
     detect_idents,
-    idents_to_adverts,
+    idents_to_cut_regions,
     pair_idents,
 )
 
@@ -125,36 +125,34 @@ def test_pair_idents_end_of_file_with_exact_duration():
     assert unpaired == 0
 
 
-# ── idents_to_adverts ────────────────────────────────────────────────────────
+# ── idents_to_cut_regions ────────────────────────────────────────────────────
 
 
-def test_idents_to_adverts_cut_span():
+def test_idents_to_cut_regions_cut_span():
     first = (10.0, 13.0)
     second = (90.0, 93.0)
-    adverts = idents_to_adverts([(first, second)])
-    assert len(adverts) == 1
-    ad = adverts[0]
-    assert ad.advert_for == ACAST_ADVERT_LABEL
-    assert ad.front_text == ""
-    assert ad.tail_text == ""
+    regions = idents_to_cut_regions([(first, second)])
+    assert len(regions) == 1
+    region = regions[0]
+    assert region.label == ACAST_ADVERT_LABEL
     # start = end_of_first = 13.0 s
-    assert ad.start_time == "00:00:13.000"
+    assert region.start_time == "00:00:13.000"
     # end = end_of_second = 93.0 s
-    assert ad.end_time == "00:01:33.000"
+    assert region.end_time == "00:01:33.000"
 
 
-def test_idents_to_adverts_empty():
-    assert idents_to_adverts([]) == []
+def test_idents_to_cut_regions_empty():
+    assert idents_to_cut_regions([]) == []
 
 
-def test_idents_to_adverts_multiple():
+def test_idents_to_cut_regions_multiple():
     pairs = [
         ((10.0, 13.0), (90.0, 93.0)),
         ((200.0, 203.0), (350.0, 353.0)),
     ]
-    adverts = idents_to_adverts(pairs)
-    assert len(adverts) == 2
-    assert all(a.advert_for == ACAST_ADVERT_LABEL for a in adverts)
+    regions = idents_to_cut_regions(pairs)
+    assert len(regions) == 2
+    assert all(r.label == ACAST_ADVERT_LABEL for r in regions)
 
 
 # ── synthetic-audio integration ───────────────────────────────────────────────
