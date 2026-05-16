@@ -48,16 +48,17 @@ def test_pair_idents_valid_pair():
 
 
 def test_pair_idents_gap_too_small():
-    a = _ident(0)
-    b = _ident(5)  # gap = 5 - 3 = 2 s, below MIN_PAIR_GAP_S
+    # Place idents far from t=0 so the start-of-file synthetic pair does not fire
+    a = _ident(MAX_PAIR_GAP_S + 100)
+    b = _ident(MAX_PAIR_GAP_S + 105)  # gap = 2 s, below MIN_PAIR_GAP_S
     pairs, unpaired = pair_idents([a, b])
     assert len(pairs) == 0
     assert unpaired == 2
 
 
 def test_pair_idents_gap_too_large():
-    a = _ident(0)
-    b = _ident(MAX_PAIR_GAP_S + 10)
+    a = _ident(MAX_PAIR_GAP_S + 100)
+    b = _ident(MAX_PAIR_GAP_S + 100 + MAX_PAIR_GAP_S + 10)
     pairs, unpaired = pair_idents([a, b])
     assert len(pairs) == 0
     assert unpaired == 2
@@ -93,6 +94,35 @@ def test_pair_idents_boundary_gap():
     pairs2, unpaired2 = pair_idents([c, d])
     assert len(pairs2) == 1
     assert unpaired2 == 0
+
+
+def test_pair_idents_end_of_file_with_stale_duration():
+    """If audio_duration is shorter than the last ident's end (e.g. RSS metadata
+    is stale), the end-of-file synthetic pair must NOT be created — otherwise it
+    would produce a cut with start > end, which previously caused the editor to
+    duplicate trailing audio."""
+    a = _ident(0)  # (0, 3)
+    b = _ident(60)  # (60, 63) — pairs with a
+    c = _ident(4540)  # (4540, 4543) — last ident
+    pairs, unpaired = pair_idents([a, b, c], audio_duration=4500.0)
+
+    # a-b pair, but c must not be paired against a smaller audio_duration
+    assert len(pairs) == 1
+    assert pairs[0] == (a, b)
+    assert unpaired == 1
+
+
+def test_pair_idents_end_of_file_with_exact_duration():
+    """audio_duration equal to last_ident end is allowed (edge case)."""
+    a = _ident(0)
+    b = _ident(60)
+    c = _ident(200)
+    pairs, unpaired = pair_idents([a, b, c], audio_duration=203.0)
+
+    # c[1] == audio_duration → synthetic pair created (gap = 0)
+    assert len(pairs) == 2
+    assert pairs[1] == (c, (203.0, 203.0))
+    assert unpaired == 0
 
 
 # ── idents_to_adverts ────────────────────────────────────────────────────────
@@ -159,8 +189,9 @@ def test_detect_idents_synthetic(tmp_path):
     audio_path = tmp_path / "test_episode.wav"
     audio.export(audio_path, format="wav")
 
-    hits = detect_idents(audio_path)
+    hits, audio_duration = detect_idents(audio_path)
 
+    assert audio_duration == pytest.approx(60.0, abs=0.05)
     assert len(hits) == len(target_offsets_s), (
         f"Expected {len(target_offsets_s)} hits, got {len(hits)}: {hits}"
     )

@@ -1,6 +1,9 @@
 import json
 import logging
+import os
+import tempfile
 from datetime import datetime, timedelta
+from pathlib import Path
 
 from celery import chain
 from sqlmodel import Session, select
@@ -13,6 +16,7 @@ from app.models import (
     ClipMode,
     ClippingReport,
     PodcastEpisode,
+    PodcastEpisodeAdvert,
     PodcastShow,
     Provider,
     TranscriptionReport,
@@ -314,8 +318,7 @@ def task_detect_acast_ads(self, episode_id: str, report_id: str) -> None:
         model_name="ident_match",
     )
     try:
-        idents = detect_idents(audio_path)
-        audio_duration = episode.duration and float(episode.duration)
+        idents, audio_duration = detect_idents(audio_path)
         pairs, unpaired = pair_idents(idents, audio_duration=audio_duration)
         adverts = idents_to_adverts(pairs)
         analysis_report.completed_at = datetime.utcnow().isoformat()
@@ -359,6 +362,147 @@ def task_detect_acast_ads(self, episode_id: str, report_id: str) -> None:
         session.commit()
 
 
+VERIFY_WINDOW_SECONDS = 300  # AI verification scans 5 min at each end of the clipped audio
+
+
+@celery_app.task(
+    name="app.tasks.task_verify_clipped_with_ai",
+    bind=True,
+    max_retries=3,
+    default_retry_delay=60,
+    autoretry_for=(Exception,),
+    retry_backoff=True,
+    retry_backoff_max=600,
+    soft_time_limit=14400,
+    time_limit=14700,
+)
+def task_verify_clipped_with_ai(self, episode_id: str, report_id: str) -> None:
+    """Acast ident matching only catches ads wrapped in acast jingles; host-read
+    ads at the start/end of an episode slip through. After the acast edit, scan
+    the first/last 5 mins of the clipped audio with the configured AI models
+    and cut anything that turns up."""
+    from pydub import AudioSegment
+
+    from app.services.editor import (
+        apply_cuts_inplace,
+        clipped_ms_to_raw_ms,
+        format_ms_to_time,
+        parse_time_to_ms,
+    )
+    from app.services.providers import Transcription, get_ai_provider
+
+    with Session(engine) as session:
+        episode = session.get(PodcastEpisode, episode_id)
+        if not episode:
+            raise ValueError(f"Episode not found: {episode_id}")
+
+        config = session.get(AppConfig, "config")
+        if not config or not config.transcription_model or not config.analysis_model:
+            _log_report(
+                report_id,
+                "AI verification skipped — transcription and/or analysis model not configured",
+            )
+            return
+
+        audio_path = episode.mp3_path
+        raw_path = episode.raw_path
+        custom_instructions = episode.podcast.custom_prompt or None
+        existing_ads = list(episode.ads)
+
+        try:
+            transcription_provider = get_ai_provider("transcription", config)
+            analysis_provider = get_ai_provider("analysis", config)
+        except ValueError as e:
+            _log_report(report_id, f"AI verification skipped — {e}")
+            return
+
+    if not audio_path.exists():
+        _log_report(report_id, "AI verification skipped — clipped audio missing")
+        return
+    if not raw_path.exists():
+        _log_report(report_id, "AI verification skipped — raw audio missing")
+        return
+
+    _log_report(report_id, "AI verification: scanning clipped audio for missed ads...")
+
+    audio = AudioSegment.from_mp3(audio_path)
+    clipped_len_ms = len(audio)
+    window_ms = VERIFY_WINDOW_SECONDS * 1000
+
+    if clipped_len_ms <= 2 * window_ms:
+        windows = [(0, audio)]
+    else:
+        windows = [
+            (0, audio[:window_ms]),
+            (clipped_len_ms - window_ms, audio[clipped_len_ms - window_ms :]),
+        ]
+
+    new_ads_clipped: list[PodcastEpisodeAdvert] = []
+    for offset_ms, window_audio in windows:
+        offset_s = offset_ms / 1000
+        temp_fd, temp_path_str = tempfile.mkstemp(suffix=".mp3")
+        temp_path = Path(temp_path_str)
+        os.close(temp_fd)
+        try:
+            window_audio.export(temp_path, format="mp3")
+            transcription = transcription_provider.transcribe(temp_path)
+            for seg in transcription.segments:
+                seg.start_time += offset_s
+                seg.end_time += offset_s
+            ads_response = analysis_provider.analyse_adverts(
+                Transcription(segments=transcription.segments),
+                custom_instructions=custom_instructions,
+            )
+            new_ads_clipped.extend(ads_response.adverts)
+        finally:
+            if temp_path.exists():
+                temp_path.unlink()
+
+    if not new_ads_clipped:
+        _log_report(report_id, "AI verification: no additional ads found")
+        return
+
+    new_ads_raw: list[PodcastEpisodeAdvert] = []
+    for ad in new_ads_clipped:
+        clip_start_ms = parse_time_to_ms(ad.start_time)
+        clip_end_ms = parse_time_to_ms(ad.end_time)
+        raw_start_ms = clipped_ms_to_raw_ms(clip_start_ms, existing_ads)
+        raw_end_ms = clipped_ms_to_raw_ms(clip_end_ms, existing_ads)
+        new_ads_raw.append(
+            PodcastEpisodeAdvert(
+                start_time=format_ms_to_time(raw_start_ms),
+                end_time=format_ms_to_time(raw_end_ms),
+                advert_for=ad.advert_for,
+                front_text=ad.front_text,
+                tail_text=ad.tail_text,
+            )
+        )
+
+    _log_report(
+        report_id,
+        f"AI verification: found {len(new_ads_raw)} additional ad(s); re-editing from raw",
+    )
+
+    with Session(engine) as session:
+        episode = session.get(PodcastEpisode, episode_id)
+        combined = sorted(
+            list(episode.ads) + new_ads_raw,
+            key=lambda a: parse_time_to_ms(a.start_time),
+        )
+        episode.ads = combined
+        session.add(episode)
+        session.commit()
+
+        ads_for_edit = list(episode.ads)
+        episode_title = episode.title
+        target_path = episode.mp3_path
+        source_path = episode.raw_path
+
+    apply_cuts_inplace(source_path, ads_for_edit, output_path=target_path, label=episode_title)
+    _update_report(report_id, edited_at=datetime.utcnow())
+    _log_report(report_id, "AI verification: re-edit complete")
+
+
 # ── Queue orchestration ──────────────────────────────────────────────────────
 
 
@@ -390,10 +534,12 @@ def queue_episode_for_clipping(
     clip_mode = episode.podcast.clip_mode
 
     if clip_mode == ClipMode.ACAST:
+        transcription_queue = _get_transcription_queue(session)
         pipeline = chain(
             task_download.si(episode.id, report.id),
             task_detect_acast_ads.si(episode.id, report.id),
             task_edit.si(episode.id, report.id),
+            task_verify_clipped_with_ai.si(episode.id, report.id).set(queue=transcription_queue),
         )
     else:
         assert clip_mode == ClipMode.AI, f"Unexpected clip_mode: {clip_mode}"

@@ -30,19 +30,26 @@ def _format_time(seconds: float) -> str:
     return f"{h:02d}:{m:02d}:{s:06.3f}"
 
 
-def detect_idents(audio_path: Path) -> list[tuple[float, float]]:
+def detect_idents(audio_path: Path) -> tuple[list[tuple[float, float]], float]:
+    """Detect Acast ident matches in an audio file.
+
+    Returns a tuple of (idents, audio_duration_seconds). The duration is measured
+    from the decoded audio, not from any external metadata — RSS-supplied
+    durations can be inaccurate and would lead to malformed end-of-file pairs.
+    """
     if not IDENT_PATH.exists() or IDENT_PATH.stat().st_size == 0:
         raise FileNotFoundError(f"Acast ident asset not found: {IDENT_PATH}")
 
     episode = _load_mono_16k(audio_path)
     ident = _load_mono_16k(IDENT_PATH)
 
+    audio_duration = len(episode) / SAMPLE_RATE
     n = len(ident)
 
     ident_centred = ident - ident.mean()
     ident_norm = np.linalg.norm(ident_centred)
     if ident_norm < 1e-10:
-        return []
+        return [], audio_duration
 
     # Normalised cross-correlation using fftconvolve (overlap-add, bounded memory)
     cross_corr = scipy.signal.fftconvolve(episode, ident_centred[::-1], "valid")
@@ -71,7 +78,8 @@ def detect_idents(audio_path: Path) -> list[tuple[float, float]]:
                 kept.append(idx)
                 last = idx
 
-    return [(int(idx) / SAMPLE_RATE, (int(idx) + n) / SAMPLE_RATE) for idx in kept]
+    idents = [(int(idx) / SAMPLE_RATE, (int(idx) + n) / SAMPLE_RATE) for idx in kept]
+    return idents, audio_duration
 
 
 def pair_idents(
@@ -108,10 +116,13 @@ def pair_idents(
 
     # End-of-file: last ident unpaired and within MAX_PAIR_GAP_S of the end →
     # it's an opening ident; the episode ended mid-ad-break with no closing ident.
+    # Require audio_duration >= last ident end so the synthetic pair can't produce
+    # an inverted (start > end) cut window.
     last_idx = len(idents) - 1
     if (
         last_idx not in used
         and audio_duration is not None
+        and idents[last_idx][1] <= audio_duration
         and (audio_duration - idents[last_idx][1]) < MAX_PAIR_GAP_S
     ):
         pairs.append((idents[last_idx], (audio_duration, audio_duration)))
