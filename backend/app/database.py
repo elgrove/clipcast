@@ -96,6 +96,23 @@ def _run_migrations() -> None:
             conn.commit()
             logger.info("Added clip_mode column to podcast_shows and backfilled from has_ads")
 
+        if "verify_acast_host_read_ads" not in show_columns:
+            conn.exec_driver_sql(
+                "ALTER TABLE podcast_shows ADD COLUMN verify_acast_host_read_ads BOOLEAN DEFAULT 0"
+            )
+            conn.commit()
+            logger.info("Added verify_acast_host_read_ads column to podcast_shows")
+
+        config_columns = [
+            row[1] for row in conn.exec_driver_sql("PRAGMA table_info(config)").fetchall()
+        ]
+        if "identify_ads_in_acast_breaks" not in config_columns:
+            conn.exec_driver_sql(
+                "ALTER TABLE config ADD COLUMN identify_ads_in_acast_breaks BOOLEAN DEFAULT 0"
+            )
+            conn.commit()
+            logger.info("Added identify_ads_in_acast_breaks column to config")
+
 
 def _backfill_cut_regions() -> None:
     """Move existing ad data onto the new `cut_regions` field.

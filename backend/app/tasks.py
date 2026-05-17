@@ -397,7 +397,19 @@ def task_analyse_acast_breaks(self, episode_id: str, report_id: str) -> None:
         acast_regions = [r for r in regions if r.label == ACAST_ADVERT_LABEL]
 
         config = session.get(AppConfig, "config")
-        has_models = config and config.transcription_model and config.analysis_model
+        if not config or not config.identify_ads_in_acast_breaks:
+            _log_report(
+                report_id,
+                "Acast break analysis skipped — identify_ads_in_acast_breaks is disabled",
+            )
+            _update_report(
+                report_id,
+                transcribed_at=datetime.utcnow(),
+                analysed_at=datetime.utcnow(),
+            )
+            return
+
+        has_models = config.transcription_model and config.analysis_model
 
         audio_path = episode.mp3_path
         custom_instructions = episode.podcast.custom_prompt or None
@@ -574,6 +586,13 @@ def task_verify_clipped_with_ai(self, episode_id: str, report_id: str) -> None:
         episode = session.get(PodcastEpisode, episode_id)
         if not episode:
             raise ValueError(f"Episode not found: {episode_id}")
+
+        if not episode.podcast.verify_acast_host_read_ads:
+            _log_report(
+                report_id,
+                "AI verification skipped — verify_acast_host_read_ads is disabled for this podcast",
+            )
+            return
 
         config = session.get(AppConfig, "config")
         if not config or not config.transcription_model or not config.analysis_model:

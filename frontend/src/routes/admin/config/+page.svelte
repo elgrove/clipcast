@@ -19,6 +19,8 @@
 	let geminiApiKey = $state('');
 	let transcriptionModelId = $state('');
 	let analysisModelId = $state('');
+	let identifyAdsInAcastBreaks = $state(false);
+	let savingAcastSetting = $state(false);
 
 	let newModelName = $state('');
 	let newModelProvider = $state('gemini');
@@ -42,6 +44,7 @@
 			geminiApiKey = cfg.gemini_api_key || '';
 			transcriptionModelId = cfg.transcription_model_id || '';
 			analysisModelId = cfg.analysis_model_id || '';
+			identifyAdsInAcastBreaks = cfg.identify_ads_in_acast_breaks;
 		} catch (e: any) {
 			toasts.addToast('error', e.message || 'Failed to load config');
 		} finally {
@@ -62,6 +65,21 @@
 			toasts.addToast('error', e.message || 'Failed to save config');
 		} finally {
 			saving = false;
+		}
+	}
+
+	async function handleSaveAcastSetting() {
+		savingAcastSetting = true;
+		try {
+			config = await updateConfig({
+				identify_ads_in_acast_breaks: identifyAdsInAcastBreaks
+			});
+			identifyAdsInAcastBreaks = config.identify_ads_in_acast_breaks;
+			toasts.addToast('success', 'Acast break analysis setting saved');
+		} catch (e: any) {
+			toasts.addToast('error', e.message || 'Failed to save');
+		} finally {
+			savingAcastSetting = false;
 		}
 	}
 
@@ -165,6 +183,29 @@
 						Save Settings
 					</button>
 				</div>
+			</div>
+		</div>
+
+		<!-- Acast clipping -->
+		<div class="rounded-xl border border-zinc-200 bg-white p-6 dark:border-zinc-800 dark:bg-zinc-900">
+			<h2 class="text-lg font-semibold text-zinc-900 dark:text-white">Acast clipping</h2>
+			<div class="mt-4 flex items-start gap-3">
+				<input
+					id="identify-acast-ads"
+					type="checkbox"
+					bind:checked={identifyAdsInAcastBreaks}
+					onchange={handleSaveAcastSetting}
+					disabled={savingAcastSetting}
+					class="mt-0.5 h-4 w-4 rounded border-zinc-300 text-emerald-600 focus:ring-emerald-500 disabled:opacity-50 dark:border-zinc-700 dark:bg-zinc-900"
+				/>
+				<label for="identify-acast-ads" class="flex-1 cursor-pointer">
+					<span class="block text-sm font-medium text-zinc-700 dark:text-zinc-300">
+						Identify individual ads inside Acast brackets
+					</span>
+					<span class="mt-0.5 block text-xs text-zinc-500 dark:text-zinc-400">
+						For each Acast ad break detected, transcribe the audio and ask the analysis model to identify the sponsors. Adverts appear in reports with the sponsor name and timing. Requires both transcription and analysis models to be configured above.
+					</span>
+				</label>
 			</div>
 		</div>
 

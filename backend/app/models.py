@@ -161,6 +161,7 @@ class AppConfig(SQLModel, table=True):
     transcription_model_id: str | None = Field(default=None, foreign_key="ai_models.id")
     analysis_model_id: str | None = Field(default=None, foreign_key="ai_models.id")
     gemini_api_key: str = Field(default="")
+    identify_ads_in_acast_breaks: bool = Field(default=False)
 
     transcription_model: AIModel | None = Relationship(
         sa_relationship_kwargs={
@@ -190,6 +191,7 @@ class PodcastShow(SQLModel, table=True):
     cleanup_keep_days: int | None = Field(default=None)
     cleanup_keep_count: int | None = Field(default=None)
     custom_prompt: str = Field(default="", sa_column=Column(Text))
+    verify_acast_host_read_ads: bool = Field(default=False)
 
     episodes: list["PodcastEpisode"] = Relationship(
         back_populates="podcast",
@@ -419,6 +421,7 @@ class PodcastShowRead(PydanticBaseModel):
     cleanup_keep_days: int | None = None
     cleanup_keep_count: int | None = None
     custom_prompt: str = ""
+    verify_acast_host_read_ads: bool = False
 
 
 class PodcastEpisodeRead(PydanticBaseModel):
@@ -449,12 +452,14 @@ class PodcastShowUpdate(PydanticBaseModel):
     cleanup_keep_days: int | None = None
     cleanup_keep_count: int | None = None
     custom_prompt: str | None = None
+    verify_acast_host_read_ads: bool | None = None
 
 
 class ConfigRead(PydanticBaseModel):
     transcription_model_id: str | None
     analysis_model_id: str | None
     gemini_api_key: str
+    identify_ads_in_acast_breaks: bool = False
     transcription_model: "AIModelRead | None" = None
     analysis_model: "AIModelRead | None" = None
 
@@ -463,6 +468,7 @@ class ConfigUpdate(PydanticBaseModel):
     transcription_model_id: str | None = None
     analysis_model_id: str | None = None
     gemini_api_key: str | None = None
+    identify_ads_in_acast_breaks: bool | None = None
 
 
 class AIModelRead(PydanticBaseModel):

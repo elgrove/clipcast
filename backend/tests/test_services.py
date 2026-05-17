@@ -226,6 +226,7 @@ def _make_acast_episode_with_clipped_audio(session, tmp_path):
         source_rss_url="https://example.com/feed",
         path_directory="acast_verify",
         clip_mode=ClipMode.ACAST,
+        verify_acast_host_read_ads=True,
     )
     session.add(podcast)
     session.commit()
@@ -418,6 +419,7 @@ def test_analyse_acast_breaks_skipped_when_no_models(session, tmp_path, monkeypa
     config = session.get(AppConfig, "config")
     config.transcription_model_id = None
     config.analysis_model_id = None
+    config.identify_ads_in_acast_breaks = True
     session.add(config)
     session.commit()
 
@@ -462,6 +464,7 @@ def test_analyse_acast_breaks_identifies_ads(session, tmp_path, monkeypatch):
     config = session.get(AppConfig, "config")
     config.transcription_model_id = tx_model.id
     config.analysis_model_id = an_model.id
+    config.identify_ads_in_acast_breaks = True
     session.add(config)
     session.commit()
 
@@ -520,6 +523,58 @@ def test_analyse_acast_breaks_identifies_ads(session, tmp_path, monkeypatch):
 
     assert report.transcribed_at is not None
     assert report.analysed_at is not None
+
+
+def test_analyse_acast_breaks_skipped_when_flag_disabled(session, tmp_path, monkeypatch):
+    """identify_ads_in_acast_breaks=False (default) → log and advance status
+    without invoking the AI providers."""
+    from app.models import AppConfig, ClippingReport
+    from app.tasks import task_analyse_acast_breaks
+
+    _align_task_engine(monkeypatch)
+
+    episode = _make_acast_episode_with_raw_audio(session, tmp_path, [(5, 8)])
+    report = ClippingReport(episode_id=episode.id)
+    session.add(report)
+    session.commit()
+    session.refresh(report)
+
+    config = session.get(AppConfig, "config")
+    # Leave models unset so a provider call would crash if reached
+    config.identify_ads_in_acast_breaks = False
+    session.add(config)
+    session.commit()
+
+    task_analyse_acast_breaks.apply(args=[episode.id, report.id]).get()
+
+    session.refresh(report)
+    assert "identify_ads_in_acast_breaks is disabled" in report.logs
+    assert report.transcribed_at is not None
+    assert report.analysed_at is not None
+
+
+def test_verify_clipped_with_ai_skipped_when_flag_disabled(session, tmp_path, monkeypatch):
+    """verify_acast_host_read_ads=False on the podcast → log and return."""
+    from app.models import ClippingReport
+    from app.tasks import task_verify_clipped_with_ai
+
+    _align_task_engine(monkeypatch)
+
+    episode = _make_acast_episode_with_clipped_audio(session, tmp_path)
+    # Override the fixture default
+    episode.podcast.verify_acast_host_read_ads = False
+    session.add(episode.podcast)
+    session.commit()
+
+    report = ClippingReport(episode_id=episode.id)
+    session.add(report)
+    session.commit()
+    session.refresh(report)
+
+    task_verify_clipped_with_ai.apply(args=[episode.id, report.id]).get()
+
+    session.refresh(report)
+    assert "verify_acast_host_read_ads is disabled" in report.logs
 
 
 # ── Migration backfill ───────────────────────────────────────────────────────
