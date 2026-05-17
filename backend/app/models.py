@@ -20,6 +20,12 @@ class PodcastEpisodeAdvert(PydanticBaseModel):
     tail_text: str
 
 
+class CutRegion(PydanticBaseModel):
+    start_time: str
+    end_time: str
+    label: str
+
+
 class TranscriptionSegment(PydanticBaseModel):
     start_time: float
     end_time: float
@@ -155,6 +161,7 @@ class AppConfig(SQLModel, table=True):
     transcription_model_id: str | None = Field(default=None, foreign_key="ai_models.id")
     analysis_model_id: str | None = Field(default=None, foreign_key="ai_models.id")
     gemini_api_key: str = Field(default="")
+    identify_ads_in_acast_breaks: bool = Field(default=False)
 
     transcription_model: AIModel | None = Relationship(
         sa_relationship_kwargs={
@@ -184,6 +191,7 @@ class PodcastShow(SQLModel, table=True):
     cleanup_keep_days: int | None = Field(default=None)
     cleanup_keep_count: int | None = Field(default=None)
     custom_prompt: str = Field(default="", sa_column=Column(Text))
+    verify_acast_host_read_ads: bool = Field(default=False)
 
     episodes: list["PodcastEpisode"] = Relationship(
         back_populates="podcast",
@@ -221,6 +229,7 @@ class PodcastEpisode(SQLModel, table=True):
     stored_filename: str = Field(default="", max_length=500)
     cleaned_at: datetime | None = Field(default=None)
     ads_json: str = Field(default="[]", sa_column=Column("ads", Text))
+    cut_regions_json: str = Field(default="[]", sa_column=Column("cut_regions", Text))
     transcription_json: str = Field(default="[]", sa_column=Column("transcription", Text))
 
     podcast: PodcastShow = Relationship(back_populates="episodes")
@@ -237,6 +246,19 @@ class PodcastEpisode(SQLModel, table=True):
         import json
 
         self.ads_json = json.dumps([a.model_dump() for a in value])
+
+    @property
+    def cut_regions(self) -> list[CutRegion]:
+        import json
+
+        raw = json.loads(self.cut_regions_json)
+        return [CutRegion(**c) for c in raw]
+
+    @cut_regions.setter
+    def cut_regions(self, value: list[CutRegion]) -> None:
+        import json
+
+        self.cut_regions_json = json.dumps([c.model_dump() for c in value])
 
     @property
     def transcription(self) -> list[TranscriptionSegment]:
@@ -399,6 +421,7 @@ class PodcastShowRead(PydanticBaseModel):
     cleanup_keep_days: int | None = None
     cleanup_keep_count: int | None = None
     custom_prompt: str = ""
+    verify_acast_host_read_ads: bool = False
 
 
 class PodcastEpisodeRead(PydanticBaseModel):
@@ -429,12 +452,14 @@ class PodcastShowUpdate(PydanticBaseModel):
     cleanup_keep_days: int | None = None
     cleanup_keep_count: int | None = None
     custom_prompt: str | None = None
+    verify_acast_host_read_ads: bool | None = None
 
 
 class ConfigRead(PydanticBaseModel):
     transcription_model_id: str | None
     analysis_model_id: str | None
     gemini_api_key: str
+    identify_ads_in_acast_breaks: bool = False
     transcription_model: "AIModelRead | None" = None
     analysis_model: "AIModelRead | None" = None
 
@@ -443,6 +468,7 @@ class ConfigUpdate(PydanticBaseModel):
     transcription_model_id: str | None = None
     analysis_model_id: str | None = None
     gemini_api_key: str | None = None
+    identify_ads_in_acast_breaks: bool | None = None
 
 
 class AIModelRead(PydanticBaseModel):

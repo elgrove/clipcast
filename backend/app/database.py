@@ -57,6 +57,14 @@ def _run_migrations() -> None:
             conn.commit()
             logger.info("Added cleaned_at column to podcast_episodes")
 
+        if "cut_regions" not in ep_columns:
+            conn.exec_driver_sql(
+                "ALTER TABLE podcast_episodes ADD COLUMN cut_regions TEXT DEFAULT '[]'"
+            )
+            conn.commit()
+            logger.info("Added cut_regions column to podcast_episodes")
+            _backfill_cut_regions()
+
         show_columns = [
             row[1] for row in conn.exec_driver_sql("PRAGMA table_info(podcast_shows)").fetchall()
         ]
@@ -87,6 +95,63 @@ def _run_migrations() -> None:
             )
             conn.commit()
             logger.info("Added clip_mode column to podcast_shows and backfilled from has_ads")
+
+        if "verify_acast_host_read_ads" not in show_columns:
+            conn.exec_driver_sql(
+                "ALTER TABLE podcast_shows ADD COLUMN verify_acast_host_read_ads BOOLEAN DEFAULT 0"
+            )
+            conn.commit()
+            logger.info("Added verify_acast_host_read_ads column to podcast_shows")
+
+        config_columns = [
+            row[1] for row in conn.exec_driver_sql("PRAGMA table_info(config)").fetchall()
+        ]
+        if "identify_ads_in_acast_breaks" not in config_columns:
+            conn.exec_driver_sql(
+                "ALTER TABLE config ADD COLUMN identify_ads_in_acast_breaks BOOLEAN DEFAULT 0"
+            )
+            conn.commit()
+            logger.info("Added identify_ads_in_acast_breaks column to config")
+
+
+def _backfill_cut_regions() -> None:
+    """Move existing ad data onto the new `cut_regions` field.
+
+    Acast bracket markers stop being "ads" — they're just cut spans, so they
+    move from `ads` to `cut_regions`. AI-identified ads stay in `ads` and are
+    also mirrored into `cut_regions` so the editor cuts them."""
+    import json
+
+    from app.models import ACAST_ADVERT_LABEL, CutRegion, PodcastEpisode
+
+    with Session(engine) as session:
+        episodes = session.exec(select(PodcastEpisode)).all()
+        count = 0
+        for episode in episodes:
+            if episode.cut_regions_json and episode.cut_regions_json != "[]":
+                continue
+            raw_ads = json.loads(episode.ads_json or "[]")
+            if not raw_ads:
+                continue
+            remaining_ads = []
+            regions: list[CutRegion] = []
+            for ad in raw_ads:
+                label = ad.get("advert_for") or ""
+                region = CutRegion(
+                    start_time=ad["start_time"],
+                    end_time=ad["end_time"],
+                    label=label or "Ad",
+                )
+                regions.append(region)
+                if label != ACAST_ADVERT_LABEL:
+                    remaining_ads.append(ad)
+            episode.cut_regions = regions
+            episode.ads_json = json.dumps(remaining_ads)
+            session.add(episode)
+            count += 1
+        session.commit()
+        if count:
+            logger.info("Backfilled cut_regions for %d episodes", count)
 
 
 def _backfill_stored_filenames() -> None:

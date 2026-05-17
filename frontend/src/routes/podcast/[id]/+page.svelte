@@ -43,6 +43,7 @@
 	let cleanupKeepDays: string = $state('');
 	let cleanupKeepCount: string = $state('');
 	let customPrompt: string = $state('');
+	let verifyAcastHostReadAds: boolean = $state(false);
 
 	let selectedIds: Set<string> = $state(new Set());
 	let downloadingIds: Set<string> = $state(new Set());
@@ -178,6 +179,7 @@
 		cleanupKeepDays = podcast?.cleanup_keep_days?.toString() ?? '';
 		cleanupKeepCount = podcast?.cleanup_keep_count?.toString() ?? '';
 		customPrompt = podcast?.custom_prompt ?? '';
+		verifyAcastHostReadAds = podcast?.verify_acast_host_read_ads ?? false;
 	}
 
 	async function handleSaveSettings() {
@@ -191,6 +193,7 @@
 				cleanup_keep_days: days,
 				cleanup_keep_count: count,
 				custom_prompt: customPrompt,
+				verify_acast_host_read_ads: verifyAcastHostReadAds,
 			});
 			initSettingsFields();
 			showSettingsModal = false;
@@ -1077,6 +1080,25 @@
 						{/each}
 					</div>
 				</div>
+
+				{#if settingsClipMode === 'acast'}
+					<div class="flex items-start gap-3">
+						<input
+							id="verify-acast-host-read"
+							type="checkbox"
+							bind:checked={verifyAcastHostReadAds}
+							class="mt-0.5 h-4 w-4 rounded border-zinc-300 text-emerald-600 focus:ring-emerald-500 dark:border-zinc-700 dark:bg-zinc-900"
+						/>
+						<label for="verify-acast-host-read" class="flex-1 cursor-pointer">
+							<span class="block text-sm font-medium text-zinc-700 dark:text-zinc-300">
+								Verify host-read ads with AI
+							</span>
+							<span class="mt-0.5 block text-xs text-zinc-500 dark:text-zinc-400">
+								After Acast clipping, scan the first and last 5 minutes of the clipped audio with the configured AI models and cut any host-read ads that slipped through. Requires transcription and analysis models to be set up on the config page.
+							</span>
+						</label>
+					</div>
+				{/if}
 
 				<hr class="border-zinc-200 dark:border-zinc-700" />
 

@@ -10,7 +10,7 @@ from app.services.acast import (
     SAMPLE_RATE,
     acast_feed_url_heuristic,
     detect_idents,
-    idents_to_adverts,
+    idents_to_cut_regions,
     pair_idents,
 )
 
@@ -48,16 +48,17 @@ def test_pair_idents_valid_pair():
 
 
 def test_pair_idents_gap_too_small():
-    a = _ident(0)
-    b = _ident(5)  # gap = 5 - 3 = 2 s, below MIN_PAIR_GAP_S
+    # Place idents far from t=0 so the start-of-file synthetic pair does not fire
+    a = _ident(MAX_PAIR_GAP_S + 100)
+    b = _ident(MAX_PAIR_GAP_S + 105)  # gap = 2 s, below MIN_PAIR_GAP_S
     pairs, unpaired = pair_idents([a, b])
     assert len(pairs) == 0
     assert unpaired == 2
 
 
 def test_pair_idents_gap_too_large():
-    a = _ident(0)
-    b = _ident(MAX_PAIR_GAP_S + 10)
+    a = _ident(MAX_PAIR_GAP_S + 100)
+    b = _ident(MAX_PAIR_GAP_S + 100 + MAX_PAIR_GAP_S + 10)
     pairs, unpaired = pair_idents([a, b])
     assert len(pairs) == 0
     assert unpaired == 2
@@ -95,36 +96,63 @@ def test_pair_idents_boundary_gap():
     assert unpaired2 == 0
 
 
-# ── idents_to_adverts ────────────────────────────────────────────────────────
+def test_pair_idents_end_of_file_with_stale_duration():
+    """If audio_duration is shorter than the last ident's end (e.g. RSS metadata
+    is stale), the end-of-file synthetic pair must NOT be created — otherwise it
+    would produce a cut with start > end, which previously caused the editor to
+    duplicate trailing audio."""
+    a = _ident(0)  # (0, 3)
+    b = _ident(60)  # (60, 63) — pairs with a
+    c = _ident(4540)  # (4540, 4543) — last ident
+    pairs, unpaired = pair_idents([a, b, c], audio_duration=4500.0)
+
+    # a-b pair, but c must not be paired against a smaller audio_duration
+    assert len(pairs) == 1
+    assert pairs[0] == (a, b)
+    assert unpaired == 1
 
 
-def test_idents_to_adverts_cut_span():
+def test_pair_idents_end_of_file_with_exact_duration():
+    """audio_duration equal to last_ident end is allowed (edge case)."""
+    a = _ident(0)
+    b = _ident(60)
+    c = _ident(200)
+    pairs, unpaired = pair_idents([a, b, c], audio_duration=203.0)
+
+    # c[1] == audio_duration → synthetic pair created (gap = 0)
+    assert len(pairs) == 2
+    assert pairs[1] == (c, (203.0, 203.0))
+    assert unpaired == 0
+
+
+# ── idents_to_cut_regions ────────────────────────────────────────────────────
+
+
+def test_idents_to_cut_regions_cut_span():
     first = (10.0, 13.0)
     second = (90.0, 93.0)
-    adverts = idents_to_adverts([(first, second)])
-    assert len(adverts) == 1
-    ad = adverts[0]
-    assert ad.advert_for == ACAST_ADVERT_LABEL
-    assert ad.front_text == ""
-    assert ad.tail_text == ""
+    regions = idents_to_cut_regions([(first, second)])
+    assert len(regions) == 1
+    region = regions[0]
+    assert region.label == ACAST_ADVERT_LABEL
     # start = end_of_first = 13.0 s
-    assert ad.start_time == "00:00:13.000"
+    assert region.start_time == "00:00:13.000"
     # end = end_of_second = 93.0 s
-    assert ad.end_time == "00:01:33.000"
+    assert region.end_time == "00:01:33.000"
 
 
-def test_idents_to_adverts_empty():
-    assert idents_to_adverts([]) == []
+def test_idents_to_cut_regions_empty():
+    assert idents_to_cut_regions([]) == []
 
 
-def test_idents_to_adverts_multiple():
+def test_idents_to_cut_regions_multiple():
     pairs = [
         ((10.0, 13.0), (90.0, 93.0)),
         ((200.0, 203.0), (350.0, 353.0)),
     ]
-    adverts = idents_to_adverts(pairs)
-    assert len(adverts) == 2
-    assert all(a.advert_for == ACAST_ADVERT_LABEL for a in adverts)
+    regions = idents_to_cut_regions(pairs)
+    assert len(regions) == 2
+    assert all(r.label == ACAST_ADVERT_LABEL for r in regions)
 
 
 # ── synthetic-audio integration ───────────────────────────────────────────────
@@ -159,8 +187,9 @@ def test_detect_idents_synthetic(tmp_path):
     audio_path = tmp_path / "test_episode.wav"
     audio.export(audio_path, format="wav")
 
-    hits = detect_idents(audio_path)
+    hits, audio_duration = detect_idents(audio_path)
 
+    assert audio_duration == pytest.approx(60.0, abs=0.05)
     assert len(hits) == len(target_offsets_s), (
         f"Expected {len(target_offsets_s)} hits, got {len(hits)}: {hits}"
     )

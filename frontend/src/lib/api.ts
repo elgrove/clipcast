@@ -70,6 +70,7 @@ export async function updatePodcast(
 		cleanup_keep_days?: number | null;
 		cleanup_keep_count?: number | null;
 		custom_prompt?: string;
+		verify_acast_host_read_ads?: boolean;
 	}
 ): Promise<PodcastShow> {
 	return fetchApi<PodcastShow>(`/api/podcasts/${id}`, {
@@ -144,6 +145,7 @@ export async function updateConfig(
 		transcription_model_id: string | null;
 		analysis_model_id: string | null;
 		gemini_api_key: string;
+		identify_ads_in_acast_breaks: boolean;
 	}>
 ): Promise<Config> {
 	return fetchApi<Config>('/api/config', {
