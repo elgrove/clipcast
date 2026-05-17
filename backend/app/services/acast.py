@@ -67,14 +67,17 @@ def detect_idents(audio_path: Path) -> tuple[list[tuple[float, float]], float]:
 
     peak_indices = np.where(normalised > THRESHOLD)[0]
 
-    # Non-maximum suppression: keep only peaks separated by at least 2x ident length
-    # (1x would allow a spurious secondary peak immediately after a real ident ends)
+    # Non-maximum suppression: keep only peaks separated by at least 3x ident
+    # length. 2x lets ringing/echo partials (score ~0.9) slip through just
+    # outside the window and get mispaired against far-away real idents; 3x
+    # absorbs them while staying well under MIN_PAIR_GAP_S so two truly
+    # back-to-back real idents are still detected separately.
     kept: list[int] = []
     if len(peak_indices) > 0:
         last = peak_indices[0]
         kept.append(last)
         for idx in peak_indices[1:]:
-            if idx - last >= 2 * n:
+            if idx - last >= 3 * n:
                 kept.append(idx)
                 last = idx
 
