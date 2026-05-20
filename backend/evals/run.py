@@ -170,6 +170,8 @@ class ModelRunSummary:
     recall: float
     f1: float
     total_cost_usd: float
+    total_input_tokens: int
+    total_output_tokens: int
     total_duration_s: float
     results: list[PipelineResult] = field(default_factory=list)
 
@@ -207,6 +209,8 @@ class RunSummary:
                     "recall": m.recall,
                     "f1": m.f1,
                     "total_cost_usd": m.total_cost_usd,
+                    "total_input_tokens": m.total_input_tokens,
+                    "total_output_tokens": m.total_output_tokens,
                     "total_duration_s": m.total_duration_s,
                     "results": [result_to_dict(r) for r in m.results],
                 }
@@ -275,6 +279,8 @@ def execute_run(config: RunConfig) -> RunSummary:
                     recall=r,
                     f1=f1,
                     total_cost_usd=sum(res.cost_usd or 0.0 for res in combined),
+                    total_input_tokens=sum(res.input_tokens or 0 for res in combined),
+                    total_output_tokens=sum(res.output_tokens or 0 for res in combined),
                     total_duration_s=sum(res.duration_seconds or 0.0 for res in combined),
                     results=combined,
                 )
@@ -294,6 +300,8 @@ def execute_run(config: RunConfig) -> RunSummary:
                 recall=r,
                 f1=f1,
                 total_cost_usd=0.0,
+                total_input_tokens=0,
+                total_output_tokens=0,
                 total_duration_s=sum(res.duration_seconds or 0.0 for res in acast_results),
                 results=acast_results,
             )

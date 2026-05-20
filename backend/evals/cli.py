@@ -48,6 +48,16 @@ def _fmt_float(x: float | None, places: int = 2) -> str:
     return f"{x:.{places}f}"
 
 
+def _fmt_tokens(n: int | None) -> str:
+    if not n:
+        return "-"
+    if n < 1000:
+        return str(n)
+    if n < 1_000_000:
+        return f"{n / 1000:.1f}k"
+    return f"{n / 1_000_000:.2f}M"
+
+
 def _write_report(summary: dict[str, Any], run_name: str) -> Path:
     REPORTS_DIR.mkdir(parents=True, exist_ok=True)
     timestamp = datetime.utcnow().strftime("%Y%m%dT%H%M%SZ")
@@ -69,9 +79,14 @@ def _print_model_run(m: run.ModelRunSummary) -> None:
     )
     print(f"Precision: {_fmt_pct(m.precision)}  Recall: {_fmt_pct(m.recall)}  F1: {_fmt_pct(m.f1)}")
     cost_str = f"${m.total_cost_usd:.4f}" if m.total_cost_usd else "$0.0000"
-    print(f"Total cost: {cost_str}  Total time: {m.total_duration_s:.1f}s")
+    print(
+        f"Total cost: {cost_str}  "
+        f"Tokens in/out: {_fmt_tokens(m.total_input_tokens)}/"
+        f"{_fmt_tokens(m.total_output_tokens)}  "
+        f"Total time: {m.total_duration_s:.1f}s"
+    )
 
-    headers = ["case", "mode", "P", "R", "F1", "dur-P", "dur-R", "FP", "FN", "$"]
+    headers = ["case", "mode", "P", "R", "F1", "dur-P", "dur-R", "FP", "FN", "in", "out", "$"]
     rows = []
     for r in m.results:
         mode = "acast" if r.use_acast else "ai"
@@ -86,6 +101,8 @@ def _print_model_run(m: run.ModelRunSummary) -> None:
                 _fmt_pct(r.duration_coverage),
                 str(len(r.false_positives)),
                 str(len(r.false_negatives)),
+                _fmt_tokens(r.input_tokens),
+                _fmt_tokens(r.output_tokens),
                 _fmt_float(r.cost_usd, 4),
             ]
         )
@@ -100,7 +117,7 @@ def _print_comparison(summary: run.RunSummary) -> None:
     if len(summary.per_model) <= 1:
         return
     print(f"\n── comparison (IoU≥{summary.config.iou_threshold}) ──")
-    headers = ["model", "P", "R", "F1", "matched", "FP", "FN", "$", "time"]
+    headers = ["model", "P", "R", "F1", "matched", "FP", "FN", "in", "out", "$", "time"]
     rows = []
     for m in summary.per_model:
         fp = sum(len(c.false_positives) for c in m.results)
@@ -114,6 +131,8 @@ def _print_comparison(summary: run.RunSummary) -> None:
                 f"{m.total_matched}/{m.total_expected}",
                 str(fp),
                 str(fn),
+                _fmt_tokens(m.total_input_tokens),
+                _fmt_tokens(m.total_output_tokens),
                 _fmt_float(m.total_cost_usd, 4),
                 _fmt_float(m.total_duration_s, 1) + "s",
             ]
