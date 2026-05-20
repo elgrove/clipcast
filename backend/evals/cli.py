@@ -2,14 +2,28 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import sys
 from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from . import acast, analysis
+from dotenv import load_dotenv
 
-RUNS_DIR = Path(__file__).parent / "runs"
+from . import pipeline, run
+from .providers import ProviderError
+
+ENV_FILE = Path(__file__).parent.parent / ".env"
+REPORTS_DIR = Path(__file__).parent / "reports"
+
+
+def _load_env() -> None:
+    if ENV_FILE.exists():
+        load_dotenv(ENV_FILE)
+
+
+def _slug(text: str) -> str:
+    return re.sub(r"[^A-Za-z0-9._-]+", "_", text).strip("_") or "run"
 
 
 def _print_table(headers: list[str], rows: list[list[str]]) -> None:
@@ -34,33 +48,37 @@ def _fmt_float(x: float | None, places: int = 2) -> str:
     return f"{x:.{places}f}"
 
 
-def _write_run(summary: dict[str, Any], eval_name: str, suffix: str = "") -> Path:
-    RUNS_DIR.mkdir(parents=True, exist_ok=True)
+def _write_report(summary: dict[str, Any], run_name: str) -> Path:
+    REPORTS_DIR.mkdir(parents=True, exist_ok=True)
     timestamp = datetime.utcnow().strftime("%Y%m%dT%H%M%SZ")
-    stem = f"{timestamp}_{eval_name}"
-    if suffix:
-        stem += f"_{suffix}"
-    path = RUNS_DIR / f"{stem}.json"
+    path = REPORTS_DIR / f"{timestamp}_{_slug(run_name)}.json"
     with path.open("w") as f:
         json.dump(summary, f, indent=2, default=str)
     return path
 
 
-def _print_analysis_summary(s: analysis.AnalysisRunSummary) -> None:
-    print(f"\nAnalysis eval — model: {s.model}  IoU≥{s.iou_threshold}")
-    print(
-        f"Cases: {s.case_count}  matched: {s.total_matched}/"
-        f"{s.total_expected} expected, {s.total_predicted} predicted"
-    )
-    print(f"Precision: {_fmt_pct(s.precision)}  Recall: {_fmt_pct(s.recall)}  F1: {_fmt_pct(s.f1)}")
-    print(f"Total cost: ${s.total_cost_usd:.4f}  Total time: {s.total_duration_s:.1f}s\n")
+# ── Output ───────────────────────────────────────────────────────────────────
 
-    headers = ["case", "P", "R", "F1", "dur-P", "dur-R", "FP", "FN", "$"]
+
+def _print_model_run(m: run.ModelRunSummary) -> None:
+    label = m.model or f"({m.provider})"
+    print(f"\n── {label} ──")
+    print(
+        f"Cases: {m.case_count}  matched: {m.total_matched}/"
+        f"{m.total_expected} expected, {m.total_predicted} predicted"
+    )
+    print(f"Precision: {_fmt_pct(m.precision)}  Recall: {_fmt_pct(m.recall)}  F1: {_fmt_pct(m.f1)}")
+    cost_str = f"${m.total_cost_usd:.4f}" if m.total_cost_usd else "$0.0000"
+    print(f"Total cost: {cost_str}  Total time: {m.total_duration_s:.1f}s")
+
+    headers = ["case", "mode", "P", "R", "F1", "dur-P", "dur-R", "FP", "FN", "$"]
     rows = []
-    for r in s.results:
+    for r in m.results:
+        mode = "acast" if r.use_acast else "ai"
         rows.append(
             [
                 r.case_id,
+                mode,
                 _fmt_pct(r.precision),
                 _fmt_pct(r.recall),
                 _fmt_pct(r.f1),
@@ -73,104 +91,96 @@ def _print_analysis_summary(s: analysis.AnalysisRunSummary) -> None:
         )
     _print_table(headers, rows)
 
-    failing = [r for r in s.results if r.error]
-    for r in failing:
-        print(f"\n[error] {r.case_id}: {r.error}")
+    for r in m.results:
+        if r.error:
+            print(f"\n[error] {r.case_id}: {r.error}")
 
 
-def _print_acast_summary(s: acast.AcastRunSummary) -> None:
-    print(f"\nAcast eval — IoU≥{s.iou_threshold}")
-    print(
-        f"Cases: {s.case_count}  matched: {s.total_matched}/"
-        f"{s.total_expected} expected, {s.total_predicted} predicted"
-    )
-    print(f"Precision: {_fmt_pct(s.precision)}  Recall: {_fmt_pct(s.recall)}  F1: {_fmt_pct(s.f1)}")
-    print(f"Total time: {s.total_duration_s:.1f}s\n")
-
-    headers = ["case", "P", "R", "F1", "dur-P", "dur-R", "idents", "unpaired", "FP", "FN"]
+def _print_comparison(summary: run.RunSummary) -> None:
+    if len(summary.per_model) <= 1:
+        return
+    print(f"\n── comparison (IoU≥{summary.config.iou_threshold}) ──")
+    headers = ["model", "P", "R", "F1", "matched", "FP", "FN", "$", "time"]
     rows = []
-    for r in s.results:
+    for m in summary.per_model:
+        fp = sum(len(c.false_positives) for c in m.results)
+        fn = sum(len(c.false_negatives) for c in m.results)
         rows.append(
             [
-                r.case_id,
-                _fmt_pct(r.precision),
-                _fmt_pct(r.recall),
-                _fmt_pct(r.f1),
-                _fmt_pct(r.duration_precision),
-                _fmt_pct(r.duration_coverage),
-                str(r.raw_ident_count),
-                str(r.unpaired_idents),
-                str(len(r.false_positives)),
-                str(len(r.false_negatives)),
+                m.model or f"({m.provider})",
+                _fmt_pct(m.precision),
+                _fmt_pct(m.recall),
+                _fmt_pct(m.f1),
+                f"{m.total_matched}/{m.total_expected}",
+                str(fp),
+                str(fn),
+                _fmt_float(m.total_cost_usd, 4),
+                _fmt_float(m.total_duration_s, 1) + "s",
             ]
         )
     _print_table(headers, rows)
 
-    failing = [r for r in s.results if r.error]
-    for r in failing:
-        print(f"\n[error] {r.case_id}: {r.error}")
+
+# ── Commands ─────────────────────────────────────────────────────────────────
 
 
 def _cmd_list(_args: argparse.Namespace) -> int:
-    a_cases = analysis.list_cases()
-    c_cases = acast.list_cases()
-    print(f"analysis ({len(a_cases)} cases):")
-    for c in a_cases:
+    cases = pipeline.list_cases()
+    configs = run.list_run_configs()
+    print(f"fixtures ({len(cases)} cases):")
+    for c in cases:
         print(f"  {c}")
-    print(f"\nacast ({len(c_cases)} cases):")
-    for c in c_cases:
-        print(f"  {c}")
+    print(f"\nrun configs ({len(configs)}):")
+    for p in configs:
+        print(f"  {p.relative_to(Path.cwd())}" if p.is_absolute() else f"  {p}")
     return 0
 
 
-def _cmd_analysis(args: argparse.Namespace) -> int:
-    summary = analysis.run(
-        case_ids=args.case or None,
-        model_name=args.model,
-        api_key=args.api_key,
-        iou_threshold=args.iou,
+def _cmd_run(args: argparse.Namespace) -> int:
+    config = run.load_run_config(args.path)
+
+    print(
+        f"Run: {config.name}  IoU≥{config.iou_threshold}  "
+        f"use_acast default={config.use_acast_default}"
     )
-    _print_analysis_summary(summary)
-    path = _write_run(summary.to_dict(), "analysis", suffix=args.model.replace("/", "_"))
-    print(f"\nReport: {path}")
-    return 0 if summary.case_count and not any(r.error for r in summary.results) else 1
+    print(
+        f"Models: {len(config.models)}  Cases: {len(config.cases)} "
+        f"(ai: {sum(1 for c in config.cases if not c.use_acast)}, "
+        f"acast: {sum(1 for c in config.cases if c.use_acast)})"
+    )
 
+    summary = run.execute_run(config)
+    for model_summary in summary.per_model:
+        _print_model_run(model_summary)
+    _print_comparison(summary)
 
-def _cmd_acast(args: argparse.Namespace) -> int:
-    summary = acast.run(case_ids=args.case or None, iou_threshold=args.iou)
-    _print_acast_summary(summary)
-    path = _write_run(summary.to_dict(), "acast")
+    path = _write_report(summary.to_dict(), config.name)
     print(f"\nReport: {path}")
-    return 0 if summary.case_count and not any(r.error for r in summary.results) else 1
+
+    any_errors = any(c.error for m in summary.per_model for c in m.results)
+    return 0 if not any_errors else 1
 
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="evals", description="Clipcast eval suite")
     sub = parser.add_subparsers(dest="command", required=True)
 
-    sub.add_parser("list", help="List available fixture cases").set_defaults(func=_cmd_list)
+    sub.add_parser("list", help="List fixture cases and run configs").set_defaults(func=_cmd_list)
 
-    p_analysis = sub.add_parser("analysis", help="Run AI ad-detection eval (live Gemini calls)")
-    p_analysis.add_argument("--case", action="append", help="Case id to run (repeatable)")
-    p_analysis.add_argument("--model", default="gemini-2.5-flash", help="Gemini model name")
-    p_analysis.add_argument("--api-key", default=None, help="Overrides GEMINI_API_KEY env var")
-    p_analysis.add_argument("--iou", type=float, default=0.5, help="IoU threshold for matching")
-    p_analysis.set_defaults(func=_cmd_analysis)
-
-    p_acast = sub.add_parser("acast", help="Run Acast marker-detection eval")
-    p_acast.add_argument("--case", action="append", help="Case id to run (repeatable)")
-    p_acast.add_argument("--iou", type=float, default=0.5, help="IoU threshold for matching")
-    p_acast.set_defaults(func=_cmd_acast)
+    p_run = sub.add_parser("run", help="Execute a TOML run config")
+    p_run.add_argument("path", help="Path to a .toml run config (see evals/runs/)")
+    p_run.set_defaults(func=_cmd_run)
 
     return parser
 
 
 def main(argv: list[str] | None = None) -> int:
+    _load_env()
     parser = build_parser()
     args = parser.parse_args(argv)
     try:
         return args.func(args)
-    except RuntimeError as exc:
+    except (RuntimeError, ProviderError, run.RunConfigError, FileNotFoundError) as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2
 

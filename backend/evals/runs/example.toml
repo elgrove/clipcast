@@ -1,0 +1,32 @@
+# Example run config. Copy and edit; reference fixture case ids that exist
+# under evals/fixtures/<case-id>/.
+
+[run]
+name = "example"
+iou_threshold = 0.5
+use_acast = false   # default for cases below; can be overridden per-case
+
+# Models to evaluate. Repeat the [[models]] block to compare multiple.
+[[models]]
+spec = "gemini:gemini-2.5-flash"
+
+# [[models]]
+# spec = "gemini:gemini-2.5-flash-lite"
+
+# Cases — one per episode. id must match an evals/fixtures/<id>/ directory.
+[[cases]]
+id = "tifo-2026-01-08"
+podcast = "Tifo Football Podcast"
+custom_prompt = """
+Tifo episodes open with a host-read sponsor segment. Treat anything before the
+first guest introduction as a likely ad.
+"""
+
+# [[cases]]
+# id = "tff-2026-01-09"
+# podcast = "Totally Football"
+# use_acast = true              # per-case override: this episode uses acast detection
+
+# [[cases]]
+# id = "fof-2026-01-05"
+# podcast = "Footballers on Football"
