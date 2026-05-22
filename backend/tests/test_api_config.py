@@ -51,6 +51,37 @@ def test_add_custom_model(client):
     assert len(response.json()) == 4
 
 
+def test_update_config_openrouter_key_round_trip(client):
+    response = client.put(
+        "/api/config",
+        json={"openrouter_api_key": "sk-or-v1-test"},
+    )
+    assert response.status_code == 200
+    assert response.json()["openrouter_api_key"] == "sk-or-v1-test"
+
+    response = client.get("/api/config")
+    assert response.json()["openrouter_api_key"] == "sk-or-v1-test"
+
+
+def test_add_custom_openrouter_model(client):
+    response = client.post(
+        "/api/models",
+        json={
+            "name": "anthropic/claude-sonnet-4",
+            "provider": "openrouter",
+            "host": "",
+        },
+    )
+    assert response.status_code == 201
+    data = response.json()
+    assert data["name"] == "anthropic/claude-sonnet-4"
+    assert data["provider"] == "openrouter"
+    assert data["is_preset"] is False
+
+    listed = client.get("/api/models").json()
+    assert any(m["name"] == "anthropic/claude-sonnet-4" for m in listed)
+
+
 def test_update_config_with_model(client):
     models = client.get("/api/models").json()
     gemini_model = next(m for m in models if m["name"] == "gemini-2.5-flash")

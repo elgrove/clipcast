@@ -88,12 +88,14 @@ class ClipMode(StrEnum):
 class Provider(StrEnum):
     GEMINI = "gemini"
     WHISPER = "whisper.cpp"
+    OPENROUTER = "openrouter"
 
     @property
     def label(self) -> str:
         labels = {
             Provider.GEMINI: "Gemini",
             Provider.WHISPER: "Whisper.cpp",
+            Provider.OPENROUTER: "OpenRouter",
         }
         return labels[self]
 
@@ -161,6 +163,7 @@ class AppConfig(SQLModel, table=True):
     transcription_model_id: str | None = Field(default=None, foreign_key="ai_models.id")
     analysis_model_id: str | None = Field(default=None, foreign_key="ai_models.id")
     gemini_api_key: str = Field(default="")
+    openrouter_api_key: str = Field(default="")
     identify_ads_in_acast_breaks: bool = Field(default=False)
 
     transcription_model: AIModel | None = Relationship(
@@ -459,6 +462,7 @@ class ConfigRead(PydanticBaseModel):
     transcription_model_id: str | None
     analysis_model_id: str | None
     gemini_api_key: str
+    openrouter_api_key: str
     identify_ads_in_acast_breaks: bool = False
     transcription_model: "AIModelRead | None" = None
     analysis_model: "AIModelRead | None" = None
@@ -468,6 +472,7 @@ class ConfigUpdate(PydanticBaseModel):
     transcription_model_id: str | None = None
     analysis_model_id: str | None = None
     gemini_api_key: str | None = None
+    openrouter_api_key: str | None = None
     identify_ads_in_acast_breaks: bool | None = None
 
 
