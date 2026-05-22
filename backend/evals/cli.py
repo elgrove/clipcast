@@ -13,7 +13,7 @@ from dotenv import load_dotenv
 from . import pipeline, run
 from .providers import ProviderError
 
-ENV_FILE = Path(__file__).parent.parent / ".env.evals"
+ENV_FILE = Path(__file__).parent / ".env.evals"
 REPORTS_DIR = Path(__file__).parent / "reports"
 
 

@@ -24,16 +24,17 @@ included in the eval pipeline.)
 
 ## Configuration
 
-API keys live in `backend/.env.evals` (git-ignored). Copy the example and fill in:
+API keys live in `backend/evals/.env.evals` (git-ignored). Copy the example
+and fill in:
 
 ```bash
-cp backend/.env.evals.example backend/.env.evals
+cp backend/evals/.env.evals.example backend/evals/.env.evals
 # set GEMINI_API_KEY=...
 ```
 
 Kept separate from the app's `backend/.env` so pydantic-settings (which only
 recognises infra config) doesn't reject API-key keys it doesn't know about.
-The CLI loads `backend/.env.evals` automatically on every run.
+The CLI loads `backend/evals/.env.evals` automatically on every run.
 
 ## Running
 
