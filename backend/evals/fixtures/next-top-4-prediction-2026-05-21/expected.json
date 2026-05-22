@@ -1,0 +1,14 @@
+[
+  {"start_time": "0.0",      "end_time": "39.12",    "label": "Eat Natural"},
+  {"start_time": "39.12",    "end_time": "70.84",    "label": "monday.com AI Agents"},
+  {"start_time": "70.84",    "end_time": "101.439",  "label": "Lloyd's Bank"},
+  {"start_time": "1762.123", "end_time": "1794.4",   "label": "Scottish Water"},
+  {"start_time": "1794.4",   "end_time": "1833.52",  "label": "Top Cashback"},
+  {"start_time": "1833.52",  "end_time": "1865.577", "label": "Lloyd's Bank"},
+  {"start_time": "3230.757", "end_time": "3275.04",  "label": "MyGarden Escape at QVC"},
+  {"start_time": "3275.04",  "end_time": "3315.04",  "label": "Eat Natural Fruit and Nut Bars"},
+  {"start_time": "3315.04",  "end_time": "3346.678", "label": "Big Dunk by Duncan Ferguson"},
+  {"start_time": "5113.436", "end_time": "5154.36",  "label": "My Garden Escape at QVC"},
+  {"start_time": "5154.36",  "end_time": "5193.36",  "label": "Eat Natural"},
+  {"start_time": "5193.36",  "end_time": "5226.031", "label": "Bluebird Care"}
+]

@@ -1,0 +1,10 @@
+[
+  {"start_time": "0.0", "end_time": "29.0", "label": "Ticumbo"},
+  {"start_time": "30.16", "end_time": "57.44", "label": "We Buy Any Car"},
+  {"start_time": "60.48", "end_time": "75.92", "label": "monday.com"},
+  {"start_time": "205.844", "end_time": "315.539", "label": "SC Libero (membership)", "optional": true},
+  {"start_time": "2214.01", "end_time": "2237.08", "label": "Abercrombie"},
+  {"start_time": "2237.08", "end_time": "2272.10", "label": "Marketreach"},
+  {"start_time": "3558.07", "end_time": "3585.72", "label": "We Buy Any Car"},
+  {"start_time": "3585.72", "end_time": "3607.32", "label": "Bloomberg"}
+]
