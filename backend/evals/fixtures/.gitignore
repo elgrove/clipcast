@@ -1,0 +1,6 @@
+# Audio fixtures are large — kept locally per developer, not in git.
+# meta.json, expected.json, transcription.json under each case dir are committed.
+*.mp3
+*.wav
+*.m4a
+*.ogg

@@ -1,0 +1,580 @@
+{
+  "name": "flash-vs-lite",
+  "iou_threshold": 0.5,
+  "use_acast_default": false,
+  "break_cluster_gap_s": 5.0,
+  "models": [
+    "gemini:gemini-2.5-flash",
+    "gemini:gemini-2.5-flash-lite"
+  ],
+  "cases": [
+    {
+      "id": "cult-of-the-manager-2026-05-05",
+      "podcast": "TBD",
+      "use_acast": false,
+      "iou_threshold": null,
+      "break_cluster_gap_s": null
+    }
+  ],
+  "per_model": [
+    {
+      "model": "gemini:gemini-2.5-flash",
+      "provider": "gemini",
+      "case_count": 1,
+      "total_matched": 7,
+      "total_predicted": 7,
+      "total_expected": 7,
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1": 1.0,
+      "name_similarity_mean": 0.9285714285714286,
+      "break_total_matched": 3,
+      "break_total_predicted": 3,
+      "break_total_expected": 3,
+      "break_precision": 1.0,
+      "break_recall": 1.0,
+      "break_f1": 1.0,
+      "total_cost_usd": 0.0,
+      "total_input_tokens": 76494,
+      "total_output_tokens": 6528,
+      "total_duration_s": 27.25888445507735,
+      "results": [
+        {
+          "case_id": "cult-of-the-manager-2026-05-05",
+          "iou_threshold": 0.5,
+          "use_acast": false,
+          "break_cluster_gap_s": 5.0,
+          "model": "gemini:gemini-2.5-flash",
+          "provider": "gemini",
+          "predicted": [
+            {
+              "start_time": 10.72,
+              "end_time": 29.0,
+              "label": "Ticumbo"
+            },
+            {
+              "start_time": 30.16,
+              "end_time": 57.44,
+              "label": "We Buy Any Car"
+            },
+            {
+              "start_time": 60.48,
+              "end_time": 75.92,
+              "label": "monday.com"
+            },
+            {
+              "start_time": 2210.28,
+              "end_time": 2237.08,
+              "label": "Abercrombie"
+            },
+            {
+              "start_time": 2237.08,
+              "end_time": 2272.28,
+              "label": "Marketreach / Door Drops"
+            },
+            {
+              "start_time": 3547.56,
+              "end_time": 3585.72,
+              "label": "We Buy Any Car"
+            },
+            {
+              "start_time": 3585.72,
+              "end_time": 3606.68,
+              "label": "Bloomberg"
+            }
+          ],
+          "expected": [
+            {
+              "start_time": 0.0,
+              "end_time": 29.0,
+              "label": "Ticumbo",
+              "optional": false
+            },
+            {
+              "start_time": 30.16,
+              "end_time": 57.44,
+              "label": "We Buy Any Car",
+              "optional": false
+            },
+            {
+              "start_time": 60.48,
+              "end_time": 75.92,
+              "label": "monday.com",
+              "optional": false
+            },
+            {
+              "start_time": 205.844,
+              "end_time": 315.539,
+              "label": "SC Libero (membership)",
+              "optional": true
+            },
+            {
+              "start_time": 2214.01,
+              "end_time": 2237.08,
+              "label": "Abercrombie",
+              "optional": false
+            },
+            {
+              "start_time": 2237.08,
+              "end_time": 2272.1,
+              "label": "Marketreach",
+              "optional": false
+            },
+            {
+              "start_time": 3558.07,
+              "end_time": 3585.72,
+              "label": "We Buy Any Car",
+              "optional": false
+            },
+            {
+              "start_time": 3585.72,
+              "end_time": 3607.32,
+              "label": "Bloomberg",
+              "optional": false
+            }
+          ],
+          "matched": 7,
+          "expected_required_count": 7,
+          "expected_optional_count": 1,
+          "precision": 1.0,
+          "recall": 1.0,
+          "f1": 1.0,
+          "duration_precision": 0.9208214364155473,
+          "duration_coverage": 0.936557578465317,
+          "false_positives": [],
+          "false_negatives": [],
+          "absorbed": [],
+          "unmatched_optional": [
+            {
+              "start_time": 205.844,
+              "end_time": 315.539,
+              "label": "SC Libero (membership)",
+              "optional": true
+            }
+          ],
+          "name_matches": [
+            {
+              "predicted": "monday.com",
+              "expected": "monday.com",
+              "similarity": 1.0,
+              "optional": false
+            },
+            {
+              "predicted": "We Buy Any Car",
+              "expected": "We Buy Any Car",
+              "similarity": 1.0,
+              "optional": false
+            },
+            {
+              "predicted": "Marketreach / Door Drops",
+              "expected": "Marketreach",
+              "similarity": 0.5,
+              "optional": false
+            },
+            {
+              "predicted": "Bloomberg",
+              "expected": "Bloomberg",
+              "similarity": 1.0,
+              "optional": false
+            },
+            {
+              "predicted": "Abercrombie",
+              "expected": "Abercrombie",
+              "similarity": 1.0,
+              "optional": false
+            },
+            {
+              "predicted": "We Buy Any Car",
+              "expected": "We Buy Any Car",
+              "similarity": 1.0,
+              "optional": false
+            },
+            {
+              "predicted": "Ticumbo",
+              "expected": "Ticumbo",
+              "similarity": 1.0,
+              "optional": false
+            }
+          ],
+          "name_similarity_mean": 0.9285714285714286,
+          "predicted_breaks": [
+            {
+              "start_time": 10.72,
+              "end_time": 75.92,
+              "label": "Ticumbo; We Buy Any Car; monday.com",
+              "optional": false
+            },
+            {
+              "start_time": 2210.28,
+              "end_time": 2272.28,
+              "label": "Abercrombie; Marketreach / Door Drops",
+              "optional": false
+            },
+            {
+              "start_time": 3547.56,
+              "end_time": 3606.68,
+              "label": "We Buy Any Car; Bloomberg",
+              "optional": false
+            }
+          ],
+          "expected_breaks": [
+            {
+              "start_time": 0.0,
+              "end_time": 75.92,
+              "label": "Ticumbo; We Buy Any Car; monday.com",
+              "optional": false
+            },
+            {
+              "start_time": 205.844,
+              "end_time": 315.539,
+              "label": "SC Libero (membership)",
+              "optional": true
+            },
+            {
+              "start_time": 2214.01,
+              "end_time": 2272.1,
+              "label": "Abercrombie; Marketreach",
+              "optional": false
+            },
+            {
+              "start_time": 3558.07,
+              "end_time": 3607.32,
+              "label": "We Buy Any Car; Bloomberg",
+              "optional": false
+            }
+          ],
+          "break_matched": 3,
+          "break_expected_required_count": 3,
+          "break_expected_optional_count": 1,
+          "break_precision": 1.0,
+          "break_recall": 1.0,
+          "break_f1": 1.0,
+          "break_duration_precision": 0.9226062687848834,
+          "break_duration_coverage": 0.938011568263667,
+          "break_false_positives": [],
+          "break_false_negatives": [],
+          "break_absorbed": [],
+          "break_unmatched_optional": [
+            {
+              "start_time": 205.844,
+              "end_time": 315.539,
+              "label": "SC Libero (membership)",
+              "optional": true
+            }
+          ],
+          "audio_duration_s": null,
+          "raw_ident_count": null,
+          "unpaired_idents": null,
+          "cost_usd": 0.0,
+          "input_tokens": 76494,
+          "output_tokens": 6528,
+          "duration_seconds": 27.25888445507735,
+          "error": null
+        }
+      ]
+    },
+    {
+      "model": "gemini:gemini-2.5-flash-lite",
+      "provider": "gemini",
+      "case_count": 1,
+      "total_matched": 7,
+      "total_predicted": 9,
+      "total_expected": 7,
+      "precision": 0.7777777777777778,
+      "recall": 1.0,
+      "f1": 0.8750000000000001,
+      "name_similarity_mean": 0.8571428571428571,
+      "break_total_matched": 3,
+      "break_total_predicted": 5,
+      "break_total_expected": 3,
+      "break_precision": 0.6,
+      "break_recall": 1.0,
+      "break_f1": 0.7499999999999999,
+      "total_cost_usd": 0.0,
+      "total_input_tokens": 76494,
+      "total_output_tokens": 913,
+      "total_duration_s": 3.2743089869618416,
+      "results": [
+        {
+          "case_id": "cult-of-the-manager-2026-05-05",
+          "iou_threshold": 0.5,
+          "use_acast": false,
+          "break_cluster_gap_s": 5.0,
+          "model": "gemini:gemini-2.5-flash-lite",
+          "provider": "gemini",
+          "predicted": [
+            {
+              "start_time": 10.72,
+              "end_time": 29.0,
+              "label": "Ticumbo"
+            },
+            {
+              "start_time": 30.16,
+              "end_time": 57.44,
+              "label": "We Buy Any Car"
+            },
+            {
+              "start_time": 60.48,
+              "end_time": 75.92,
+              "label": "monday.com"
+            },
+            {
+              "start_time": 206.44,
+              "end_time": 249.64,
+              "label": "Libro"
+            },
+            {
+              "start_time": 2210.28,
+              "end_time": 2237.08,
+              "label": "Abercrombie"
+            },
+            {
+              "start_time": 2237.08,
+              "end_time": 2272.28,
+              "label": "Door Drops"
+            },
+            {
+              "start_time": 3457.62,
+              "end_time": 3518.68,
+              "label": "SC Libro"
+            },
+            {
+              "start_time": 3547.56,
+              "end_time": 3585.72,
+              "label": "We Buy Any Car"
+            },
+            {
+              "start_time": 3585.72,
+              "end_time": 3606.68,
+              "label": "Bloomberg"
+            }
+          ],
+          "expected": [
+            {
+              "start_time": 0.0,
+              "end_time": 29.0,
+              "label": "Ticumbo",
+              "optional": false
+            },
+            {
+              "start_time": 30.16,
+              "end_time": 57.44,
+              "label": "We Buy Any Car",
+              "optional": false
+            },
+            {
+              "start_time": 60.48,
+              "end_time": 75.92,
+              "label": "monday.com",
+              "optional": false
+            },
+            {
+              "start_time": 205.844,
+              "end_time": 315.539,
+              "label": "SC Libero (membership)",
+              "optional": true
+            },
+            {
+              "start_time": 2214.01,
+              "end_time": 2237.08,
+              "label": "Abercrombie",
+              "optional": false
+            },
+            {
+              "start_time": 2237.08,
+              "end_time": 2272.1,
+              "label": "Marketreach",
+              "optional": false
+            },
+            {
+              "start_time": 3558.07,
+              "end_time": 3585.72,
+              "label": "We Buy Any Car",
+              "optional": false
+            },
+            {
+              "start_time": 3585.72,
+              "end_time": 3607.32,
+              "label": "Bloomberg",
+              "optional": false
+            }
+          ],
+          "matched": 7,
+          "expected_required_count": 7,
+          "expected_optional_count": 1,
+          "precision": 0.7777777777777778,
+          "recall": 1.0,
+          "f1": 0.8750000000000001,
+          "duration_precision": 0.5855855855855837,
+          "duration_coverage": 0.936557578465317,
+          "false_positives": [
+            {
+              "start_time": 206.44,
+              "end_time": 249.64,
+              "label": "Libro"
+            },
+            {
+              "start_time": 3457.62,
+              "end_time": 3518.68,
+              "label": "SC Libro"
+            }
+          ],
+          "false_negatives": [],
+          "absorbed": [],
+          "unmatched_optional": [
+            {
+              "start_time": 205.844,
+              "end_time": 315.539,
+              "label": "SC Libero (membership)",
+              "optional": true
+            }
+          ],
+          "name_matches": [
+            {
+              "predicted": "monday.com",
+              "expected": "monday.com",
+              "similarity": 1.0,
+              "optional": false
+            },
+            {
+              "predicted": "We Buy Any Car",
+              "expected": "We Buy Any Car",
+              "similarity": 1.0,
+              "optional": false
+            },
+            {
+              "predicted": "Door Drops",
+              "expected": "Marketreach",
+              "similarity": 0.0,
+              "optional": false
+            },
+            {
+              "predicted": "Bloomberg",
+              "expected": "Bloomberg",
+              "similarity": 1.0,
+              "optional": false
+            },
+            {
+              "predicted": "Abercrombie",
+              "expected": "Abercrombie",
+              "similarity": 1.0,
+              "optional": false
+            },
+            {
+              "predicted": "We Buy Any Car",
+              "expected": "We Buy Any Car",
+              "similarity": 1.0,
+              "optional": false
+            },
+            {
+              "predicted": "Ticumbo",
+              "expected": "Ticumbo",
+              "similarity": 1.0,
+              "optional": false
+            }
+          ],
+          "name_similarity_mean": 0.8571428571428571,
+          "predicted_breaks": [
+            {
+              "start_time": 10.72,
+              "end_time": 75.92,
+              "label": "Ticumbo; We Buy Any Car; monday.com",
+              "optional": false
+            },
+            {
+              "start_time": 206.44,
+              "end_time": 249.64,
+              "label": "Libro",
+              "optional": false
+            },
+            {
+              "start_time": 2210.28,
+              "end_time": 2272.28,
+              "label": "Abercrombie; Door Drops",
+              "optional": false
+            },
+            {
+              "start_time": 3457.62,
+              "end_time": 3518.68,
+              "label": "SC Libro",
+              "optional": false
+            },
+            {
+              "start_time": 3547.56,
+              "end_time": 3606.68,
+              "label": "We Buy Any Car; Bloomberg",
+              "optional": false
+            }
+          ],
+          "expected_breaks": [
+            {
+              "start_time": 0.0,
+              "end_time": 75.92,
+              "label": "Ticumbo; We Buy Any Car; monday.com",
+              "optional": false
+            },
+            {
+              "start_time": 205.844,
+              "end_time": 315.539,
+              "label": "SC Libero (membership)",
+              "optional": true
+            },
+            {
+              "start_time": 2214.01,
+              "end_time": 2272.1,
+              "label": "Abercrombie; Marketreach",
+              "optional": false
+            },
+            {
+              "start_time": 3558.07,
+              "end_time": 3607.32,
+              "label": "We Buy Any Car; Bloomberg",
+              "optional": false
+            }
+          ],
+          "break_matched": 3,
+          "break_expected_required_count": 3,
+          "break_expected_optional_count": 1,
+          "break_precision": 0.6,
+          "break_recall": 1.0,
+          "break_f1": 0.7499999999999999,
+          "break_duration_precision": 0.591575469750153,
+          "break_duration_coverage": 0.938011568263667,
+          "break_false_positives": [
+            {
+              "start_time": 206.44,
+              "end_time": 249.64,
+              "label": "Libro",
+              "optional": false
+            },
+            {
+              "start_time": 3457.62,
+              "end_time": 3518.68,
+              "label": "SC Libro",
+              "optional": false
+            }
+          ],
+          "break_false_negatives": [],
+          "break_absorbed": [],
+          "break_unmatched_optional": [
+            {
+              "start_time": 205.844,
+              "end_time": 315.539,
+              "label": "SC Libero (membership)",
+              "optional": true
+            }
+          ],
+          "audio_duration_s": null,
+          "raw_ident_count": null,
+          "unpaired_idents": null,
+          "cost_usd": 0.0,
+          "input_tokens": 76494,
+          "output_tokens": 913,
+          "duration_seconds": 3.2743089869618416,
+          "error": null
+        }
+      ]
+    }
+  ],
+  "acast_results": []
+}

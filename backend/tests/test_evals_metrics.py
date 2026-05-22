@@ -2,10 +2,12 @@ import pytest
 
 from evals.metrics import (
     Interval,
+    cluster_regions,
     count_metrics,
     duration_metrics,
     iou,
     match_intervals,
+    name_similarity,
     parse_time,
 )
 
@@ -202,3 +204,148 @@ def test_duration_metrics_no_expected():
     assert d.predicted_seconds == 30
     assert d.expected_seconds == 0
     assert d.precision == 0.0
+
+
+# ── cluster_regions ──────────────────────────────────────────────────────────
+
+
+def test_cluster_regions_empty():
+    assert cluster_regions([], gap_threshold=5.0) == []
+
+
+def test_cluster_regions_no_merges_when_gaps_exceed_threshold():
+    # 30s gap > 5s threshold; nothing merges
+    intervals = [Interval(0, 30, "a"), Interval(60, 90, "b")]
+    result = cluster_regions(intervals, gap_threshold=5.0)
+    assert len(result) == 2
+    assert result == intervals
+
+
+def test_cluster_regions_merges_touching_back_to_back():
+    # Two back-to-back ads (gap = 0) collapse into one
+    intervals = [Interval(0, 30, "Cadbury"), Interval(30, 60, "Monday")]
+    result = cluster_regions(intervals, gap_threshold=5.0)
+    assert len(result) == 1
+    assert result[0].start == 0
+    assert result[0].end == 60
+    assert "Cadbury" in result[0].label and "Monday" in result[0].label
+
+
+def test_cluster_regions_merges_within_threshold():
+    # 3-second gap is within the 5s threshold
+    intervals = [Interval(0, 30, "a"), Interval(33, 60, "b")]
+    result = cluster_regions(intervals, gap_threshold=5.0)
+    assert len(result) == 1
+    assert (result[0].start, result[0].end) == (0, 60)
+
+
+def test_cluster_regions_separates_at_threshold_boundary():
+    # Gap of exactly 5.001s is over threshold; should not merge
+    intervals = [Interval(0, 30, "a"), Interval(35.001, 65, "b")]
+    result = cluster_regions(intervals, gap_threshold=5.0)
+    assert len(result) == 2
+
+
+def test_cluster_regions_handles_real_guardiola_data():
+    # Three back-to-back ads at episode start (gaps 0.32s, 0s) — one break
+    # Mid-roll cluster of 3 (gaps 3.28s, 0s) — one break
+    # Final cluster of 3 (gaps 0s, 0s) — one break
+    intervals = [
+        Interval(0.0, 29.92, "Cadbury"),
+        Interval(30.24, 61.09, "Monday"),
+        Interval(61.09, 92.6, "Starling"),
+        Interval(1674.434, 1718.554, "Tui"),
+        Interval(1721.834, 1748.674, "Starling"),
+        Interval(1748.674, 1781.054, "Cadbury"),
+        Interval(4965.14, 4997.305, "Swiss"),
+        Interval(4997.305, 5017.545, "McDonald's"),
+        Interval(5017.545, 5047.353, "Vanta"),
+    ]
+    result = cluster_regions(intervals, gap_threshold=5.0)
+    assert len(result) == 3
+    assert (result[0].start, result[0].end) == (0.0, 92.6)
+    assert (result[1].start, result[1].end) == (1674.434, 1781.054)
+    assert (result[2].start, result[2].end) == (4965.14, 5047.353)
+
+
+def test_cluster_regions_unsorted_input():
+    intervals = [Interval(60, 90, "b"), Interval(0, 30, "a")]
+    result = cluster_regions(intervals, gap_threshold=5.0)
+    # Sorted by start, not merged (30s gap > 5s threshold)
+    assert [iv.start for iv in result] == [0, 60]
+
+
+# ── name_similarity ──────────────────────────────────────────────────────────
+
+
+def test_name_similarity_identical():
+    assert name_similarity("Monday.com", "Monday.com") == 1.0
+
+
+def test_name_similarity_case_insensitive():
+    assert name_similarity("Monday.com", "monday.com") == 1.0
+
+
+def test_name_similarity_punctuation_matches():
+    # Both tokenise to {monday, com} regardless of casing/symbols
+    assert name_similarity("Monday.com", "MONDAY .COM") == 1.0
+
+
+def test_name_similarity_partial():
+    # {microsoft, 365, copilot} vs {copilot}: F1 = 2*1/(3+1) = 0.5
+    assert name_similarity("Microsoft 365 Copilot", "Copilot") == pytest.approx(0.5)
+
+
+def test_name_similarity_completely_different():
+    assert name_similarity("Cadbury", "Monday") == 0.0
+
+
+def test_name_similarity_empty_string():
+    assert name_similarity("", "Cadbury") == 0.0
+    assert name_similarity("Cadbury", "") == 0.0
+
+
+def test_name_similarity_extra_tokens_lower_score():
+    # {tui} vs {tui, travel}: F1 = 2*1/(1+2) ≈ 0.667
+    assert name_similarity("Tui", "Tui Travel") == pytest.approx(2 / 3)
+
+
+# ── optional flag on Interval / cluster_regions ──────────────────────────────
+
+
+def test_interval_optional_defaults_false():
+    iv = Interval(0, 10)
+    assert iv.optional is False
+
+
+def test_cluster_regions_optional_aggregates_via_and():
+    # Two adjacent intervals: one required, one optional → cluster is REQUIRED
+    intervals = [
+        Interval(0, 30, "a", optional=False),
+        Interval(30, 60, "b", optional=True),
+    ]
+    result = cluster_regions(intervals, gap_threshold=5.0)
+    assert len(result) == 1
+    assert result[0].optional is False
+
+
+def test_cluster_regions_all_optional_stays_optional():
+    intervals = [
+        Interval(0, 30, "a", optional=True),
+        Interval(30, 60, "b", optional=True),
+    ]
+    result = cluster_regions(intervals, gap_threshold=5.0)
+    assert len(result) == 1
+    assert result[0].optional is True
+
+
+def test_cluster_regions_distant_optional_preserved():
+    # Two non-adjacent intervals; the optional one stays its own cluster
+    intervals = [
+        Interval(0, 30, "a", optional=False),
+        Interval(200, 300, "b", optional=True),
+    ]
+    result = cluster_regions(intervals, gap_threshold=5.0)
+    assert len(result) == 2
+    assert result[0].optional is False
+    assert result[1].optional is True

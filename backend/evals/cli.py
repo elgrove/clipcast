@@ -13,7 +13,7 @@ from dotenv import load_dotenv
 from . import pipeline, run
 from .providers import ProviderError
 
-ENV_FILE = Path(__file__).parent.parent / ".env"
+ENV_FILE = Path(__file__).parent.parent / ".env.evals"
 REPORTS_DIR = Path(__file__).parent / "reports"
 
 
@@ -74,10 +74,18 @@ def _print_model_run(m: run.ModelRunSummary) -> None:
     label = m.model or f"({m.provider})"
     print(f"\n── {label} ──")
     print(
-        f"Cases: {m.case_count}  matched: {m.total_matched}/"
-        f"{m.total_expected} expected, {m.total_predicted} predicted"
+        f"Cases: {m.case_count}  "
+        f"ads matched: {m.total_matched}/{m.total_expected}  "
+        f"breaks matched: {m.break_total_matched}/{m.break_total_expected}"
     )
-    print(f"Precision: {_fmt_pct(m.precision)}  Recall: {_fmt_pct(m.recall)}  F1: {_fmt_pct(m.f1)}")
+    print(
+        f"Ad-level   P: {_fmt_pct(m.precision)}  R: {_fmt_pct(m.recall)}  "
+        f"F1: {_fmt_pct(m.f1)}  name-sim: {_fmt_pct(m.name_similarity_mean)}"
+    )
+    print(
+        f"Break-level P: {_fmt_pct(m.break_precision)}  R: {_fmt_pct(m.break_recall)}  "
+        f"F1: {_fmt_pct(m.break_f1)}"
+    )
     cost_str = f"${m.total_cost_usd:.4f}" if m.total_cost_usd else "$0.0000"
     print(
         f"Total cost: {cost_str}  "
@@ -86,7 +94,22 @@ def _print_model_run(m: run.ModelRunSummary) -> None:
         f"Total time: {m.total_duration_s:.1f}s"
     )
 
-    headers = ["case", "mode", "P", "R", "F1", "dur-P", "dur-R", "FP", "FN", "in", "out", "$"]
+    headers = [
+        "case",
+        "mode",
+        "ad-P",
+        "ad-R",
+        "ad-F1",
+        "name",
+        "brk-P",
+        "brk-R",
+        "brk-F1",
+        "dur-P",
+        "dur-R",
+        "in",
+        "out",
+        "$",
+    ]
     rows = []
     for r in m.results:
         mode = "acast" if r.use_acast else "ai"
@@ -97,10 +120,12 @@ def _print_model_run(m: run.ModelRunSummary) -> None:
                 _fmt_pct(r.precision),
                 _fmt_pct(r.recall),
                 _fmt_pct(r.f1),
-                _fmt_pct(r.duration_precision),
-                _fmt_pct(r.duration_coverage),
-                str(len(r.false_positives)),
-                str(len(r.false_negatives)),
+                _fmt_pct(r.name_similarity_mean),
+                _fmt_pct(r.break_precision),
+                _fmt_pct(r.break_recall),
+                _fmt_pct(r.break_f1),
+                _fmt_pct(r.break_duration_precision),
+                _fmt_pct(r.break_duration_coverage),
                 _fmt_tokens(r.input_tokens),
                 _fmt_tokens(r.output_tokens),
                 _fmt_float(r.cost_usd, 4),
@@ -116,21 +141,32 @@ def _print_model_run(m: run.ModelRunSummary) -> None:
 def _print_comparison(summary: run.RunSummary) -> None:
     if len(summary.per_model) <= 1:
         return
-    print(f"\n── comparison (IoU≥{summary.config.iou_threshold}) ──")
-    headers = ["model", "P", "R", "F1", "matched", "FP", "FN", "in", "out", "$", "time"]
+    print(
+        f"\n── comparison (IoU≥{summary.config.iou_threshold}, "
+        f"break gap ≤{summary.config.break_cluster_gap_s}s) ──"
+    )
+    headers = [
+        "model",
+        "ad-F1",
+        "name",
+        "brk-F1",
+        "ads",
+        "brks",
+        "in",
+        "out",
+        "$",
+        "time",
+    ]
     rows = []
     for m in summary.per_model:
-        fp = sum(len(c.false_positives) for c in m.results)
-        fn = sum(len(c.false_negatives) for c in m.results)
         rows.append(
             [
                 m.model or f"({m.provider})",
-                _fmt_pct(m.precision),
-                _fmt_pct(m.recall),
                 _fmt_pct(m.f1),
+                _fmt_pct(m.name_similarity_mean),
+                _fmt_pct(m.break_f1),
                 f"{m.total_matched}/{m.total_expected}",
-                str(fp),
-                str(fn),
+                f"{m.break_total_matched}/{m.break_total_expected}",
                 _fmt_tokens(m.total_input_tokens),
                 _fmt_tokens(m.total_output_tokens),
                 _fmt_float(m.total_cost_usd, 4),

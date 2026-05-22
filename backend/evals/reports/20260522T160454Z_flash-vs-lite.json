@@ -1,0 +1,1204 @@
+{
+  "name": "flash-vs-lite",
+  "iou_threshold": 0.5,
+  "use_acast_default": false,
+  "break_cluster_gap_s": 5.0,
+  "models": [
+    "gemini:gemini-2.5-flash",
+    "gemini:gemini-2.5-flash-lite"
+  ],
+  "cases": [
+    {
+      "id": "cult-of-the-manager-2026-05-05",
+      "podcast": "TBD",
+      "use_acast": false,
+      "iou_threshold": null,
+      "break_cluster_gap_s": null
+    },
+    {
+      "id": "next-top-4-prediction-2026-05-21",
+      "podcast": "TBD",
+      "use_acast": false,
+      "iou_threshold": null,
+      "break_cluster_gap_s": null
+    }
+  ],
+  "per_model": [
+    {
+      "model": "gemini:gemini-2.5-flash",
+      "provider": "gemini",
+      "case_count": 2,
+      "total_matched": 19,
+      "total_predicted": 19,
+      "total_expected": 19,
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1": 1.0,
+      "name_similarity_mean": 0.9250398724082934,
+      "break_total_matched": 7,
+      "break_total_predicted": 7,
+      "break_total_expected": 7,
+      "break_precision": 1.0,
+      "break_recall": 1.0,
+      "break_f1": 1.0,
+      "total_cost_usd": 0.0,
+      "total_input_tokens": 217308,
+      "total_output_tokens": 11832,
+      "total_duration_s": 44.91111764498055,
+      "results": [
+        {
+          "case_id": "cult-of-the-manager-2026-05-05",
+          "iou_threshold": 0.5,
+          "use_acast": false,
+          "break_cluster_gap_s": 5.0,
+          "model": "gemini:gemini-2.5-flash",
+          "provider": "gemini",
+          "predicted": [
+            {
+              "start_time": 10.72,
+              "end_time": 29.0,
+              "label": "Ticumbo"
+            },
+            {
+              "start_time": 30.16,
+              "end_time": 57.44,
+              "label": "We Buy Any Car"
+            },
+            {
+              "start_time": 60.48,
+              "end_time": 75.92,
+              "label": "monday.com"
+            },
+            {
+              "start_time": 2210.28,
+              "end_time": 2237.08,
+              "label": "Abercrombie"
+            },
+            {
+              "start_time": 2237.08,
+              "end_time": 2272.28,
+              "label": "Marketreach (Door Drops)"
+            },
+            {
+              "start_time": 3547.56,
+              "end_time": 3585.72,
+              "label": "We Buy Any Car"
+            },
+            {
+              "start_time": 3585.72,
+              "end_time": 3606.68,
+              "label": "Bloomberg"
+            }
+          ],
+          "expected": [
+            {
+              "start_time": 0.0,
+              "end_time": 29.0,
+              "label": "Ticumbo",
+              "optional": false
+            },
+            {
+              "start_time": 30.16,
+              "end_time": 57.44,
+              "label": "We Buy Any Car",
+              "optional": false
+            },
+            {
+              "start_time": 60.48,
+              "end_time": 75.92,
+              "label": "monday.com",
+              "optional": false
+            },
+            {
+              "start_time": 205.844,
+              "end_time": 315.539,
+              "label": "SC Libero (membership)",
+              "optional": true
+            },
+            {
+              "start_time": 2214.01,
+              "end_time": 2237.08,
+              "label": "Abercrombie",
+              "optional": false
+            },
+            {
+              "start_time": 2237.08,
+              "end_time": 2272.1,
+              "label": "Marketreach",
+              "optional": false
+            },
+            {
+              "start_time": 3558.07,
+              "end_time": 3585.72,
+              "label": "We Buy Any Car",
+              "optional": false
+            },
+            {
+              "start_time": 3585.72,
+              "end_time": 3607.32,
+              "label": "Bloomberg",
+              "optional": false
+            }
+          ],
+          "matched": 7,
+          "expected_required_count": 7,
+          "expected_optional_count": 1,
+          "precision": 1.0,
+          "recall": 1.0,
+          "f1": 1.0,
+          "duration_precision": 0.9208214364155473,
+          "duration_coverage": 0.936557578465317,
+          "false_positives": [],
+          "false_negatives": [],
+          "absorbed": [],
+          "unmatched_optional": [
+            {
+              "start_time": 205.844,
+              "end_time": 315.539,
+              "label": "SC Libero (membership)",
+              "optional": true
+            }
+          ],
+          "name_matches": [
+            {
+              "predicted": "monday.com",
+              "expected": "monday.com",
+              "similarity": 1.0,
+              "optional": false
+            },
+            {
+              "predicted": "We Buy Any Car",
+              "expected": "We Buy Any Car",
+              "similarity": 1.0,
+              "optional": false
+            },
+            {
+              "predicted": "Marketreach (Door Drops)",
+              "expected": "Marketreach",
+              "similarity": 0.5,
+              "optional": false
+            },
+            {
+              "predicted": "Bloomberg",
+              "expected": "Bloomberg",
+              "similarity": 1.0,
+              "optional": false
+            },
+            {
+              "predicted": "Abercrombie",
+              "expected": "Abercrombie",
+              "similarity": 1.0,
+              "optional": false
+            },
+            {
+              "predicted": "We Buy Any Car",
+              "expected": "We Buy Any Car",
+              "similarity": 1.0,
+              "optional": false
+            },
+            {
+              "predicted": "Ticumbo",
+              "expected": "Ticumbo",
+              "similarity": 1.0,
+              "optional": false
+            }
+          ],
+          "name_similarity_mean": 0.9285714285714286,
+          "predicted_breaks": [
+            {
+              "start_time": 10.72,
+              "end_time": 75.92,
+              "label": "Ticumbo; We Buy Any Car; monday.com",
+              "optional": false
+            },
+            {
+              "start_time": 2210.28,
+              "end_time": 2272.28,
+              "label": "Abercrombie; Marketreach (Door Drops)",
+              "optional": false
+            },
+            {
+              "start_time": 3547.56,
+              "end_time": 3606.68,
+              "label": "We Buy Any Car; Bloomberg",
+              "optional": false
+            }
+          ],
+          "expected_breaks": [
+            {
+              "start_time": 0.0,
+              "end_time": 75.92,
+              "label": "Ticumbo; We Buy Any Car; monday.com",
+              "optional": false
+            },
+            {
+              "start_time": 205.844,
+              "end_time": 315.539,
+              "label": "SC Libero (membership)",
+              "optional": true
+            },
+            {
+              "start_time": 2214.01,
+              "end_time": 2272.1,
+              "label": "Abercrombie; Marketreach",
+              "optional": false
+            },
+            {
+              "start_time": 3558.07,
+              "end_time": 3607.32,
+              "label": "We Buy Any Car; Bloomberg",
+              "optional": false
+            }
+          ],
+          "break_matched": 3,
+          "break_expected_required_count": 3,
+          "break_expected_optional_count": 1,
+          "break_precision": 1.0,
+          "break_recall": 1.0,
+          "break_f1": 1.0,
+          "break_duration_precision": 0.9226062687848834,
+          "break_duration_coverage": 0.938011568263667,
+          "break_false_positives": [],
+          "break_false_negatives": [],
+          "break_absorbed": [],
+          "break_unmatched_optional": [
+            {
+              "start_time": 205.844,
+              "end_time": 315.539,
+              "label": "SC Libero (membership)",
+              "optional": true
+            }
+          ],
+          "audio_duration_s": null,
+          "raw_ident_count": null,
+          "unpaired_idents": null,
+          "cost_usd": 0.0,
+          "input_tokens": 76494,
+          "output_tokens": 5128,
+          "duration_seconds": 24.807030791416764,
+          "error": null
+        },
+        {
+          "case_id": "next-top-4-prediction-2026-05-21",
+          "iou_threshold": 0.5,
+          "use_acast": false,
+          "break_cluster_gap_s": 5.0,
+          "model": "gemini:gemini-2.5-flash",
+          "provider": "gemini",
+          "predicted": [
+            {
+              "start_time": 2.95,
+              "end_time": 39.12,
+              "label": "Eat Natural"
+            },
+            {
+              "start_time": 39.12,
+              "end_time": 70.84,
+              "label": "monday.com"
+            },
+            {
+              "start_time": 70.84,
+              "end_time": 99.4,
+              "label": "Lloyd's Bank"
+            },
+            {
+              "start_time": 1761.44,
+              "end_time": 1794.4,
+              "label": "Scottish Water"
+            },
+            {
+              "start_time": 1794.4,
+              "end_time": 1833.52,
+              "label": "Top Cashback"
+            },
+            {
+              "start_time": 1833.52,
+              "end_time": 1867.04,
+              "label": "Lloyd's Bank"
+            },
+            {
+              "start_time": 3230.04,
+              "end_time": 3275.04,
+              "label": "MyGarden Escape at QVC"
+            },
+            {
+              "start_time": 3275.04,
+              "end_time": 3315.04,
+              "label": "Eat Natural"
+            },
+            {
+              "start_time": 3315.04,
+              "end_time": 3345.04,
+              "label": "Big Dunk by Duncan Ferguson (Book)"
+            },
+            {
+              "start_time": 5115.96,
+              "end_time": 5154.36,
+              "label": "My Garden Escape at QVC"
+            },
+            {
+              "start_time": 5154.36,
+              "end_time": 5193.36,
+              "label": "Eat Natural"
+            },
+            {
+              "start_time": 5193.36,
+              "end_time": 5223.36,
+              "label": "Bluebird Care"
+            }
+          ],
+          "expected": [
+            {
+              "start_time": 0.0,
+              "end_time": 39.12,
+              "label": "Eat Natural",
+              "optional": false
+            },
+            {
+              "start_time": 39.12,
+              "end_time": 70.84,
+              "label": "monday.com AI Agents",
+              "optional": false
+            },
+            {
+              "start_time": 70.84,
+              "end_time": 101.439,
+              "label": "Lloyd's Bank",
+              "optional": false
+            },
+            {
+              "start_time": 1762.123,
+              "end_time": 1794.4,
+              "label": "Scottish Water",
+              "optional": false
+            },
+            {
+              "start_time": 1794.4,
+              "end_time": 1833.52,
+              "label": "Top Cashback",
+              "optional": false
+            },
+            {
+              "start_time": 1833.52,
+              "end_time": 1865.577,
+              "label": "Lloyd's Bank",
+              "optional": false
+            },
+            {
+              "start_time": 3230.757,
+              "end_time": 3275.04,
+              "label": "MyGarden Escape at QVC",
+              "optional": false
+            },
+            {
+              "start_time": 3275.04,
+              "end_time": 3315.04,
+              "label": "Eat Natural Fruit and Nut Bars",
+              "optional": false
+            },
+            {
+              "start_time": 3315.04,
+              "end_time": 3346.678,
+              "label": "Big Dunk by Duncan Ferguson",
+              "optional": false
+            },
+            {
+              "start_time": 5113.436,
+              "end_time": 5154.36,
+              "label": "My Garden Escape at QVC",
+              "optional": false
+            },
+            {
+              "start_time": 5154.36,
+              "end_time": 5193.36,
+              "label": "Eat Natural",
+              "optional": false
+            },
+            {
+              "start_time": 5193.36,
+              "end_time": 5226.031,
+              "label": "Bluebird Care",
+              "optional": false
+            }
+          ],
+          "matched": 12,
+          "expected_required_count": 12,
+          "expected_optional_count": 0,
+          "precision": 1.0,
+          "recall": 1.0,
+          "f1": 1.0,
+          "duration_precision": 0.9932548003298385,
+          "duration_coverage": 0.9727232244831083,
+          "false_positives": [],
+          "false_negatives": [],
+          "absorbed": [],
+          "unmatched_optional": [],
+          "name_matches": [
+            {
+              "predicted": "Eat Natural",
+              "expected": "Eat Natural",
+              "similarity": 1.0,
+              "optional": false
+            },
+            {
+              "predicted": "Eat Natural",
+              "expected": "Eat Natural Fruit and Nut Bars",
+              "similarity": 0.5,
+              "optional": false
+            },
+            {
+              "predicted": "Top Cashback",
+              "expected": "Top Cashback",
+              "similarity": 1.0,
+              "optional": false
+            },
+            {
+              "predicted": "monday.com",
+              "expected": "monday.com AI Agents",
+              "similarity": 0.6666666666666666,
+              "optional": false
+            },
+            {
+              "predicted": "MyGarden Escape at QVC",
+              "expected": "MyGarden Escape at QVC",
+              "similarity": 1.0,
+              "optional": false
+            },
+            {
+              "predicted": "Scottish Water",
+              "expected": "Scottish Water",
+              "similarity": 1.0,
+              "optional": false
+            },
+            {
+              "predicted": "Lloyd's Bank",
+              "expected": "Lloyd's Bank",
+              "similarity": 1.0,
+              "optional": false
+            },
+            {
+              "predicted": "Big Dunk by Duncan Ferguson (Book)",
+              "expected": "Big Dunk by Duncan Ferguson",
+              "similarity": 0.9090909090909091,
+              "optional": false
+            },
+            {
+              "predicted": "My Garden Escape at QVC",
+              "expected": "My Garden Escape at QVC",
+              "similarity": 1.0,
+              "optional": false
+            },
+            {
+              "predicted": "Lloyd's Bank",
+              "expected": "Lloyd's Bank",
+              "similarity": 1.0,
+              "optional": false
+            },
+            {
+              "predicted": "Eat Natural",
+              "expected": "Eat Natural",
+              "similarity": 1.0,
+              "optional": false
+            },
+            {
+              "predicted": "Bluebird Care",
+              "expected": "Bluebird Care",
+              "similarity": 1.0,
+              "optional": false
+            }
+          ],
+          "name_similarity_mean": 0.9229797979797979,
+          "predicted_breaks": [
+            {
+              "start_time": 2.95,
+              "end_time": 99.4,
+              "label": "Eat Natural; monday.com; Lloyd's Bank",
+              "optional": false
+            },
+            {
+              "start_time": 1761.44,
+              "end_time": 1867.04,
+              "label": "Scottish Water; Top Cashback; Lloyd's Bank",
+              "optional": false
+            },
+            {
+              "start_time": 3230.04,
+              "end_time": 3345.04,
+              "label": "MyGarden Escape at QVC; Eat Natural; Big Dunk by Duncan Ferguson (Book)",
+              "optional": false
+            },
+            {
+              "start_time": 5115.96,
+              "end_time": 5223.36,
+              "label": "My Garden Escape at QVC; Eat Natural; Bluebird Care",
+              "optional": false
+            }
+          ],
+          "expected_breaks": [
+            {
+              "start_time": 0.0,
+              "end_time": 101.439,
+              "label": "Eat Natural; monday.com AI Agents; Lloyd's Bank",
+              "optional": false
+            },
+            {
+              "start_time": 1762.123,
+              "end_time": 1865.577,
+              "label": "Scottish Water; Top Cashback; Lloyd's Bank",
+              "optional": false
+            },
+            {
+              "start_time": 3230.757,
+              "end_time": 3346.678,
+              "label": "MyGarden Escape at QVC; Eat Natural Fruit and Nut Bars; Big Dunk by Duncan Ferguson",
+              "optional": false
+            },
+            {
+              "start_time": 5113.436,
+              "end_time": 5226.031,
+              "label": "My Garden Escape at QVC; Eat Natural; Bluebird Care",
+              "optional": false
+            }
+          ],
+          "break_matched": 4,
+          "break_expected_required_count": 4,
+          "break_expected_optional_count": 0,
+          "break_precision": 1.0,
+          "break_recall": 1.0,
+          "break_f1": 1.0,
+          "break_duration_precision": 0.9932548003298385,
+          "break_duration_coverage": 0.9727232244831083,
+          "break_false_positives": [],
+          "break_false_negatives": [],
+          "break_absorbed": [],
+          "break_unmatched_optional": [],
+          "audio_duration_s": null,
+          "raw_ident_count": null,
+          "unpaired_idents": null,
+          "cost_usd": 0.0,
+          "input_tokens": 140814,
+          "output_tokens": 6704,
+          "duration_seconds": 20.104086853563786,
+          "error": null
+        }
+      ]
+    },
+    {
+      "model": "gemini:gemini-2.5-flash-lite",
+      "provider": "gemini",
+      "case_count": 2,
+      "total_matched": 14,
+      "total_predicted": 17,
+      "total_expected": 19,
+      "precision": 0.8235294117647058,
+      "recall": 0.7368421052631579,
+      "f1": 0.7777777777777778,
+      "name_similarity_mean": 0.8095238095238094,
+      "break_total_matched": 5,
+      "break_total_predicted": 9,
+      "break_total_expected": 7,
+      "break_precision": 0.5555555555555556,
+      "break_recall": 0.7142857142857143,
+      "break_f1": 0.6250000000000001,
+      "total_cost_usd": 0.0,
+      "total_input_tokens": 217308,
+      "total_output_tokens": 2508,
+      "total_duration_s": 9.143226416781545,
+      "results": [
+        {
+          "case_id": "cult-of-the-manager-2026-05-05",
+          "iou_threshold": 0.5,
+          "use_acast": false,
+          "break_cluster_gap_s": 5.0,
+          "model": "gemini:gemini-2.5-flash-lite",
+          "provider": "gemini",
+          "predicted": [
+            {
+              "start_time": 10.72,
+              "end_time": 25.6,
+              "label": "Ticumbo"
+            },
+            {
+              "start_time": 30.16,
+              "end_time": 57.44,
+              "label": "We Buy Any Car"
+            },
+            {
+              "start_time": 60.48,
+              "end_time": 75.92,
+              "label": "monday.com"
+            },
+            {
+              "start_time": 2210.28,
+              "end_time": 2237.08,
+              "label": "Abercrombie"
+            },
+            {
+              "start_time": 2237.08,
+              "end_time": 2272.28,
+              "label": "Door Drop"
+            },
+            {
+              "start_time": 3547.56,
+              "end_time": 3585.72,
+              "label": "We Buy Any Car"
+            },
+            {
+              "start_time": 3585.72,
+              "end_time": 3606.68,
+              "label": "Bloomberg"
+            }
+          ],
+          "expected": [
+            {
+              "start_time": 0.0,
+              "end_time": 29.0,
+              "label": "Ticumbo",
+              "optional": false
+            },
+            {
+              "start_time": 30.16,
+              "end_time": 57.44,
+              "label": "We Buy Any Car",
+              "optional": false
+            },
+            {
+              "start_time": 60.48,
+              "end_time": 75.92,
+              "label": "monday.com",
+              "optional": false
+            },
+            {
+              "start_time": 205.844,
+              "end_time": 315.539,
+              "label": "SC Libero (membership)",
+              "optional": true
+            },
+            {
+              "start_time": 2214.01,
+              "end_time": 2237.08,
+              "label": "Abercrombie",
+              "optional": false
+            },
+            {
+              "start_time": 2237.08,
+              "end_time": 2272.1,
+              "label": "Marketreach",
+              "optional": false
+            },
+            {
+              "start_time": 3558.07,
+              "end_time": 3585.72,
+              "label": "We Buy Any Car",
+              "optional": false
+            },
+            {
+              "start_time": 3585.72,
+              "end_time": 3607.32,
+              "label": "Bloomberg",
+              "optional": false
+            }
+          ],
+          "matched": 7,
+          "expected_required_count": 7,
+          "expected_optional_count": 1,
+          "precision": 1.0,
+          "recall": 1.0,
+          "f1": 1.0,
+          "duration_precision": 0.9193151298119934,
+          "duration_coverage": 0.9175695297665567,
+          "false_positives": [],
+          "false_negatives": [],
+          "absorbed": [],
+          "unmatched_optional": [
+            {
+              "start_time": 205.844,
+              "end_time": 315.539,
+              "label": "SC Libero (membership)",
+              "optional": true
+            }
+          ],
+          "name_matches": [
+            {
+              "predicted": "monday.com",
+              "expected": "monday.com",
+              "similarity": 1.0,
+              "optional": false
+            },
+            {
+              "predicted": "We Buy Any Car",
+              "expected": "We Buy Any Car",
+              "similarity": 1.0,
+              "optional": false
+            },
+            {
+              "predicted": "Door Drop",
+              "expected": "Marketreach",
+              "similarity": 0.0,
+              "optional": false
+            },
+            {
+              "predicted": "Bloomberg",
+              "expected": "Bloomberg",
+              "similarity": 1.0,
+              "optional": false
+            },
+            {
+              "predicted": "Abercrombie",
+              "expected": "Abercrombie",
+              "similarity": 1.0,
+              "optional": false
+            },
+            {
+              "predicted": "We Buy Any Car",
+              "expected": "We Buy Any Car",
+              "similarity": 1.0,
+              "optional": false
+            },
+            {
+              "predicted": "Ticumbo",
+              "expected": "Ticumbo",
+              "similarity": 1.0,
+              "optional": false
+            }
+          ],
+          "name_similarity_mean": 0.8571428571428571,
+          "predicted_breaks": [
+            {
+              "start_time": 10.72,
+              "end_time": 75.92,
+              "label": "Ticumbo; We Buy Any Car; monday.com",
+              "optional": false
+            },
+            {
+              "start_time": 2210.28,
+              "end_time": 2272.28,
+              "label": "Abercrombie; Door Drop",
+              "optional": false
+            },
+            {
+              "start_time": 3547.56,
+              "end_time": 3606.68,
+              "label": "We Buy Any Car; Bloomberg",
+              "optional": false
+            }
+          ],
+          "expected_breaks": [
+            {
+              "start_time": 0.0,
+              "end_time": 75.92,
+              "label": "Ticumbo; We Buy Any Car; monday.com",
+              "optional": false
+            },
+            {
+              "start_time": 205.844,
+              "end_time": 315.539,
+              "label": "SC Libero (membership)",
+              "optional": true
+            },
+            {
+              "start_time": 2214.01,
+              "end_time": 2272.1,
+              "label": "Abercrombie; Marketreach",
+              "optional": false
+            },
+            {
+              "start_time": 3558.07,
+              "end_time": 3607.32,
+              "label": "We Buy Any Car; Bloomberg",
+              "optional": false
+            }
+          ],
+          "break_matched": 3,
+          "break_expected_required_count": 3,
+          "break_expected_optional_count": 1,
+          "break_precision": 1.0,
+          "break_recall": 1.0,
+          "break_f1": 1.0,
+          "break_duration_precision": 0.9226062687848834,
+          "break_duration_coverage": 0.938011568263667,
+          "break_false_positives": [],
+          "break_false_negatives": [],
+          "break_absorbed": [],
+          "break_unmatched_optional": [
+            {
+              "start_time": 205.844,
+              "end_time": 315.539,
+              "label": "SC Libero (membership)",
+              "optional": true
+            }
+          ],
+          "audio_duration_s": null,
+          "raw_ident_count": null,
+          "unpaired_idents": null,
+          "cost_usd": 0.0,
+          "input_tokens": 76494,
+          "output_tokens": 701,
+          "duration_seconds": 2.324211234226823,
+          "error": null
+        },
+        {
+          "case_id": "next-top-4-prediction-2026-05-21",
+          "iou_threshold": 0.5,
+          "use_acast": false,
+          "break_cluster_gap_s": 5.0,
+          "model": "gemini:gemini-2.5-flash-lite",
+          "provider": "gemini",
+          "predicted": [
+            {
+              "start_time": 2.95,
+              "end_time": 39.12,
+              "label": "Eat Natural"
+            },
+            {
+              "start_time": 44.28,
+              "end_time": 70.84,
+              "label": "monday.com"
+            },
+            {
+              "start_time": 85.32,
+              "end_time": 99.4,
+              "label": "Lloyds Bank"
+            },
+            {
+              "start_time": 1758.76,
+              "end_time": 1794.4,
+              "label": "Scottish Water"
+            },
+            {
+              "start_time": 1794.4,
+              "end_time": 1833.52,
+              "label": "Top Cashback"
+            },
+            {
+              "start_time": 3230.04,
+              "end_time": 3275.04,
+              "label": "My Garden Escape at QVC"
+            },
+            {
+              "start_time": 3275.04,
+              "end_time": 3315.04,
+              "label": "Eat Natural"
+            },
+            {
+              "start_time": 3315.04,
+              "end_time": 3345.04,
+              "label": "Duncan Ferguson (book)"
+            },
+            {
+              "start_time": 5207.36,
+              "end_time": 5221.36,
+              "label": "Bluebird Care"
+            },
+            {
+              "start_time": 5221.36,
+              "end_time": 5256.04,
+              "label": "Eat Natural"
+            }
+          ],
+          "expected": [
+            {
+              "start_time": 0.0,
+              "end_time": 39.12,
+              "label": "Eat Natural",
+              "optional": false
+            },
+            {
+              "start_time": 39.12,
+              "end_time": 70.84,
+              "label": "monday.com AI Agents",
+              "optional": false
+            },
+            {
+              "start_time": 70.84,
+              "end_time": 101.439,
+              "label": "Lloyd's Bank",
+              "optional": false
+            },
+            {
+              "start_time": 1762.123,
+              "end_time": 1794.4,
+              "label": "Scottish Water",
+              "optional": false
+            },
+            {
+              "start_time": 1794.4,
+              "end_time": 1833.52,
+              "label": "Top Cashback",
+              "optional": false
+            },
+            {
+              "start_time": 1833.52,
+              "end_time": 1865.577,
+              "label": "Lloyd's Bank",
+              "optional": false
+            },
+            {
+              "start_time": 3230.757,
+              "end_time": 3275.04,
+              "label": "MyGarden Escape at QVC",
+              "optional": false
+            },
+            {
+              "start_time": 3275.04,
+              "end_time": 3315.04,
+              "label": "Eat Natural Fruit and Nut Bars",
+              "optional": false
+            },
+            {
+              "start_time": 3315.04,
+              "end_time": 3346.678,
+              "label": "Big Dunk by Duncan Ferguson",
+              "optional": false
+            },
+            {
+              "start_time": 5113.436,
+              "end_time": 5154.36,
+              "label": "My Garden Escape at QVC",
+              "optional": false
+            },
+            {
+              "start_time": 5154.36,
+              "end_time": 5193.36,
+              "label": "Eat Natural",
+              "optional": false
+            },
+            {
+              "start_time": 5193.36,
+              "end_time": 5226.031,
+              "label": "Bluebird Care",
+              "optional": false
+            }
+          ],
+          "matched": 7,
+          "expected_required_count": 12,
+          "expected_optional_count": 0,
+          "precision": 0.7,
+          "recall": 0.5833333333333334,
+          "f1": 0.6363636363636365,
+          "duration_precision": 0.8918667724028544,
+          "duration_coverage": 0.6487198004656113,
+          "false_positives": [
+            {
+              "start_time": 85.32,
+              "end_time": 99.4,
+              "label": "Lloyds Bank"
+            },
+            {
+              "start_time": 5207.36,
+              "end_time": 5221.36,
+              "label": "Bluebird Care"
+            },
+            {
+              "start_time": 5221.36,
+              "end_time": 5256.04,
+              "label": "Eat Natural"
+            }
+          ],
+          "false_negatives": [
+            {
+              "start_time": 70.84,
+              "end_time": 101.439,
+              "label": "Lloyd's Bank",
+              "optional": false
+            },
+            {
+              "start_time": 1833.52,
+              "end_time": 1865.577,
+              "label": "Lloyd's Bank",
+              "optional": false
+            },
+            {
+              "start_time": 5113.436,
+              "end_time": 5154.36,
+              "label": "My Garden Escape at QVC",
+              "optional": false
+            },
+            {
+              "start_time": 5154.36,
+              "end_time": 5193.36,
+              "label": "Eat Natural",
+              "optional": false
+            },
+            {
+              "start_time": 5193.36,
+              "end_time": 5226.031,
+              "label": "Bluebird Care",
+              "optional": false
+            }
+          ],
+          "absorbed": [],
+          "unmatched_optional": [],
+          "name_matches": [
+            {
+              "predicted": "Eat Natural",
+              "expected": "Eat Natural Fruit and Nut Bars",
+              "similarity": 0.5,
+              "optional": false
+            },
+            {
+              "predicted": "Top Cashback",
+              "expected": "Top Cashback",
+              "similarity": 1.0,
+              "optional": false
+            },
+            {
+              "predicted": "My Garden Escape at QVC",
+              "expected": "MyGarden Escape at QVC",
+              "similarity": 0.6666666666666666,
+              "optional": false
+            },
+            {
+              "predicted": "Duncan Ferguson (book)",
+              "expected": "Big Dunk by Duncan Ferguson",
+              "similarity": 0.5,
+              "optional": false
+            },
+            {
+              "predicted": "Eat Natural",
+              "expected": "Eat Natural",
+              "similarity": 1.0,
+              "optional": false
+            },
+            {
+              "predicted": "Scottish Water",
+              "expected": "Scottish Water",
+              "similarity": 1.0,
+              "optional": false
+            },
+            {
+              "predicted": "monday.com",
+              "expected": "monday.com AI Agents",
+              "similarity": 0.6666666666666666,
+              "optional": false
+            }
+          ],
+          "name_similarity_mean": 0.7619047619047619,
+          "predicted_breaks": [
+            {
+              "start_time": 2.95,
+              "end_time": 39.12,
+              "label": "Eat Natural",
+              "optional": false
+            },
+            {
+              "start_time": 44.28,
+              "end_time": 70.84,
+              "label": "monday.com",
+              "optional": false
+            },
+            {
+              "start_time": 85.32,
+              "end_time": 99.4,
+              "label": "Lloyds Bank",
+              "optional": false
+            },
+            {
+              "start_time": 1758.76,
+              "end_time": 1833.52,
+              "label": "Scottish Water; Top Cashback",
+              "optional": false
+            },
+            {
+              "start_time": 3230.04,
+              "end_time": 3345.04,
+              "label": "My Garden Escape at QVC; Eat Natural; Duncan Ferguson (book)",
+              "optional": false
+            },
+            {
+              "start_time": 5207.36,
+              "end_time": 5256.04,
+              "label": "Bluebird Care; Eat Natural",
+              "optional": false
+            }
+          ],
+          "expected_breaks": [
+            {
+              "start_time": 0.0,
+              "end_time": 101.439,
+              "label": "Eat Natural; monday.com AI Agents; Lloyd's Bank",
+              "optional": false
+            },
+            {
+              "start_time": 1762.123,
+              "end_time": 1865.577,
+              "label": "Scottish Water; Top Cashback; Lloyd's Bank",
+              "optional": false
+            },
+            {
+              "start_time": 3230.757,
+              "end_time": 3346.678,
+              "label": "MyGarden Escape at QVC; Eat Natural Fruit and Nut Bars; Big Dunk by Duncan Ferguson",
+              "optional": false
+            },
+            {
+              "start_time": 5113.436,
+              "end_time": 5226.031,
+              "label": "My Garden Escape at QVC; Eat Natural; Bluebird Care",
+              "optional": false
+            }
+          ],
+          "break_matched": 2,
+          "break_expected_required_count": 4,
+          "break_expected_optional_count": 0,
+          "break_precision": 0.3333333333333333,
+          "break_recall": 0.5,
+          "break_f1": 0.4,
+          "break_duration_precision": 0.8918667724028544,
+          "break_duration_coverage": 0.6487198004656113,
+          "break_false_positives": [
+            {
+              "start_time": 2.95,
+              "end_time": 39.12,
+              "label": "Eat Natural",
+              "optional": false
+            },
+            {
+              "start_time": 44.28,
+              "end_time": 70.84,
+              "label": "monday.com",
+              "optional": false
+            },
+            {
+              "start_time": 85.32,
+              "end_time": 99.4,
+              "label": "Lloyds Bank",
+              "optional": false
+            },
+            {
+              "start_time": 5207.36,
+              "end_time": 5256.04,
+              "label": "Bluebird Care; Eat Natural",
+              "optional": false
+            }
+          ],
+          "break_false_negatives": [
+            {
+              "start_time": 0.0,
+              "end_time": 101.439,
+              "label": "Eat Natural; monday.com AI Agents; Lloyd's Bank",
+              "optional": false
+            },
+            {
+              "start_time": 5113.436,
+              "end_time": 5226.031,
+              "label": "My Garden Escape at QVC; Eat Natural; Bluebird Care",
+              "optional": false
+            }
+          ],
+          "break_absorbed": [],
+          "break_unmatched_optional": [],
+          "audio_duration_s": null,
+          "raw_ident_count": null,
+          "unpaired_idents": null,
+          "cost_usd": 0.0,
+          "input_tokens": 140814,
+          "output_tokens": 1807,
+          "duration_seconds": 6.819015182554722,
+          "error": null
+        }
+      ]
+    }
+  ],
+  "acast_results": []
+}

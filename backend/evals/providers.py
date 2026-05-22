@@ -15,10 +15,25 @@ class ProviderSpec:
     factory: Callable[[str, str], AIProviderBase]
 
 
+# Pricing table for cost reporting. Values are cents per 1M tokens for text
+# input/output (matching app/services/providers.py:calculate_cost which divides
+# by 100). Update whenever Google adjusts list prices.
+# Source: https://ai.google.dev/pricing (verified 2026-05-22).
+GEMINI_PRICING: dict[str, tuple[int, int]] = {
+    "gemini-2.5-flash": (30, 250),  # $0.30 in / $2.50 out per 1M tokens
+    "gemini-2.5-flash-lite": (10, 40),  # $0.10 in / $0.40 out per 1M tokens
+    "gemini-3.5-flash": (150, 900),  # $1.50 in / $9.00 out per 1M tokens
+    "gemini-3-flash-preview": (50, 300),  # $0.50 in / $3.00 out per 1M tokens
+}
+
+
 def _gemini_factory(model_name: str, api_key: str) -> AIProviderBase:
+    input_price, output_price = GEMINI_PRICING.get(model_name, (0, 0))
     model_config = AIModel(
         name=model_name,
         provider=Provider.GEMINI.value,
+        input_price=input_price,
+        output_price=output_price,
         is_preset=False,
     )
     return GeminiProvider(api_key=api_key, model_config=model_config)

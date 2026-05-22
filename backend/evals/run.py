@@ -25,6 +25,7 @@ class CaseConfig:
     custom_prompt: str | None
     use_acast: bool
     iou_threshold: float | None
+    break_cluster_gap_s: float | None
 
 
 @dataclass(frozen=True)
@@ -32,14 +33,29 @@ class RunConfig:
     name: str
     iou_threshold: float
     use_acast_default: bool
+    break_cluster_gap_s: float
     models: list[ModelSpec]
     cases: list[CaseConfig]
     source_path: Path | None = None
 
 
-_ALLOWED_RUN_KEYS = {"name", "iou_threshold", "use_acast", "models", "cases"}
+_ALLOWED_RUN_KEYS = {
+    "name",
+    "iou_threshold",
+    "use_acast",
+    "break_cluster_gap_s",
+    "models",
+    "cases",
+}
 _ALLOWED_MODEL_KEYS = {"spec", "provider", "model"}
-_ALLOWED_CASE_KEYS = {"id", "podcast", "custom_prompt", "use_acast", "iou_threshold"}
+_ALLOWED_CASE_KEYS = {
+    "id",
+    "podcast",
+    "custom_prompt",
+    "use_acast",
+    "iou_threshold",
+    "break_cluster_gap_s",
+}
 
 
 def _coerce_bool(value: Any, key: str) -> bool:
@@ -102,6 +118,11 @@ def _parse_case(entry: Any, idx: int, default_use_acast: bool) -> CaseConfig:
         iou_threshold=_coerce_float(entry["iou_threshold"], f"cases[{idx}].iou_threshold")
         if "iou_threshold" in entry
         else None,
+        break_cluster_gap_s=_coerce_float(
+            entry["break_cluster_gap_s"], f"cases[{idx}].break_cluster_gap_s"
+        )
+        if "break_cluster_gap_s" in entry
+        else None,
     )
 
 
@@ -121,6 +142,9 @@ def load_run_config(path: str | Path) -> RunConfig:
     name = _coerce_str(run_section.get("name", path.stem), "run.name")
     iou_threshold = _coerce_float(run_section.get("iou_threshold", 0.5), "run.iou_threshold")
     use_acast_default = _coerce_bool(run_section.get("use_acast", False), "run.use_acast")
+    break_cluster_gap_s = _coerce_float(
+        run_section.get("break_cluster_gap_s", 5.0), "run.break_cluster_gap_s"
+    )
 
     raw_models = data.get("models", [])
     if not isinstance(raw_models, list):
@@ -143,6 +167,7 @@ def load_run_config(path: str | Path) -> RunConfig:
         name=name,
         iou_threshold=iou_threshold,
         use_acast_default=use_acast_default,
+        break_cluster_gap_s=break_cluster_gap_s,
         models=models,
         cases=cases,
         source_path=path,
@@ -163,12 +188,22 @@ class ModelRunSummary:
     model: str | None
     provider: str | None
     case_count: int
+    # Ad-level
     total_matched: int
     total_predicted: int
     total_expected: int
     precision: float
     recall: float
     f1: float
+    name_similarity_mean: float
+    # Break-level
+    break_total_matched: int
+    break_total_predicted: int
+    break_total_expected: int
+    break_precision: float
+    break_recall: float
+    break_f1: float
+    # Cost / time
     total_cost_usd: float
     total_input_tokens: int
     total_output_tokens: int
@@ -187,6 +222,7 @@ class RunSummary:
             "name": self.config.name,
             "iou_threshold": self.config.iou_threshold,
             "use_acast_default": self.config.use_acast_default,
+            "break_cluster_gap_s": self.config.break_cluster_gap_s,
             "models": [m.label for m in self.config.models],
             "cases": [
                 {
@@ -194,6 +230,7 @@ class RunSummary:
                     "podcast": c.podcast,
                     "use_acast": c.use_acast,
                     "iou_threshold": c.iou_threshold,
+                    "break_cluster_gap_s": c.break_cluster_gap_s,
                 }
                 for c in self.config.cases
             ],
@@ -208,6 +245,13 @@ class RunSummary:
                     "precision": m.precision,
                     "recall": m.recall,
                     "f1": m.f1,
+                    "name_similarity_mean": m.name_similarity_mean,
+                    "break_total_matched": m.break_total_matched,
+                    "break_total_predicted": m.break_total_predicted,
+                    "break_total_expected": m.break_total_expected,
+                    "break_precision": m.break_precision,
+                    "break_recall": m.break_recall,
+                    "break_f1": m.break_f1,
                     "total_cost_usd": m.total_cost_usd,
                     "total_input_tokens": m.total_input_tokens,
                     "total_output_tokens": m.total_output_tokens,
@@ -220,14 +264,39 @@ class RunSummary:
         }
 
 
-def _aggregate(results: list[PipelineResult]) -> tuple[int, int, int, float, float, float]:
-    matched = sum(r.matched for r in results)
-    predicted = sum(len(r.predicted) for r in results)
-    expected = sum(len(r.expected) for r in results)
+def _aggregate(
+    results: list[PipelineResult], *, level: str
+) -> tuple[int, int, int, float, float, float]:
+    """Tiered micro-average. `matched` = required-only TP. `predicted` and
+    `expected` totals are the effective values: absorbed predictions are
+    excluded from the predicted denominator; optional expecteds are excluded
+    from the expected denominator."""
+    if level == "ad":
+        matched = sum(r.matched for r in results)
+        # Effective predicted = TP + FP (absorbed-by-optional excluded)
+        predicted = sum(r.matched + len(r.false_positives) for r in results)
+        # Effective expected = required only
+        expected = sum(r.expected_required_count for r in results)
+    elif level == "break":
+        matched = sum(r.break_matched for r in results)
+        predicted = sum(r.break_matched + len(r.break_false_positives) for r in results)
+        expected = sum(r.break_expected_required_count for r in results)
+    else:
+        raise ValueError(f"Unknown aggregation level: {level}")
     precision = matched / predicted if predicted else (1.0 if expected == 0 else 0.0)
     recall = matched / expected if expected else (1.0 if predicted == 0 else 0.0)
     f1 = (2 * precision * recall / (precision + recall)) if (precision + recall) else 0.0
     return matched, predicted, expected, precision, recall, f1
+
+
+def _mean_name_similarity(results: list[PipelineResult]) -> float:
+    total_matches = 0
+    total = 0.0
+    for r in results:
+        for nm in r.name_matches:
+            total += nm.similarity
+            total_matches += 1
+    return total / total_matches if total_matches else 0.0
 
 
 def execute_run(config: RunConfig) -> RunSummary:
@@ -240,6 +309,11 @@ def execute_run(config: RunConfig) -> RunSummary:
     acast_results: list[PipelineResult] = []
     for case_cfg in acast_cases:
         iou = case_cfg.iou_threshold or config.iou_threshold
+        gap = (
+            case_cfg.break_cluster_gap_s
+            if case_cfg.break_cluster_gap_s is not None
+            else config.break_cluster_gap_s
+        )
         acast_results.append(
             run_case(
                 loaded_cases[case_cfg.id],
@@ -247,6 +321,7 @@ def execute_run(config: RunConfig) -> RunSummary:
                 model=None,
                 custom_prompt=None,
                 iou_threshold=iou,
+                break_cluster_gap_s=gap,
             )
         )
 
@@ -256,6 +331,11 @@ def execute_run(config: RunConfig) -> RunSummary:
             ai_results: list[PipelineResult] = []
             for case_cfg in ai_cases:
                 iou = case_cfg.iou_threshold or config.iou_threshold
+                gap = (
+                    case_cfg.break_cluster_gap_s
+                    if case_cfg.break_cluster_gap_s is not None
+                    else config.break_cluster_gap_s
+                )
                 ai_results.append(
                     run_case(
                         loaded_cases[case_cfg.id],
@@ -263,21 +343,30 @@ def execute_run(config: RunConfig) -> RunSummary:
                         model=model_spec,
                         custom_prompt=case_cfg.custom_prompt,
                         iou_threshold=iou,
+                        break_cluster_gap_s=gap,
                     )
                 )
             combined = ai_results + acast_results
-            matched, predicted, expected, p, r, f1 = _aggregate(combined)
+            ad_matched, ad_pred, ad_exp, ad_p, ad_r, ad_f1 = _aggregate(combined, level="ad")
+            br_matched, br_pred, br_exp, br_p, br_r, br_f1 = _aggregate(combined, level="break")
             per_model.append(
                 ModelRunSummary(
                     model=model_spec.label,
                     provider=model_spec.provider,
                     case_count=len(combined),
-                    total_matched=matched,
-                    total_predicted=predicted,
-                    total_expected=expected,
-                    precision=p,
-                    recall=r,
-                    f1=f1,
+                    total_matched=ad_matched,
+                    total_predicted=ad_pred,
+                    total_expected=ad_exp,
+                    precision=ad_p,
+                    recall=ad_r,
+                    f1=ad_f1,
+                    name_similarity_mean=_mean_name_similarity(combined),
+                    break_total_matched=br_matched,
+                    break_total_predicted=br_pred,
+                    break_total_expected=br_exp,
+                    break_precision=br_p,
+                    break_recall=br_r,
+                    break_f1=br_f1,
                     total_cost_usd=sum(res.cost_usd or 0.0 for res in combined),
                     total_input_tokens=sum(res.input_tokens or 0 for res in combined),
                     total_output_tokens=sum(res.output_tokens or 0 for res in combined),
@@ -287,18 +376,26 @@ def execute_run(config: RunConfig) -> RunSummary:
             )
     else:
         # Acast-only run: still report aggregate under a single "no-model" summary
-        matched, predicted, expected, p, r, f1 = _aggregate(acast_results)
+        ad_matched, ad_pred, ad_exp, ad_p, ad_r, ad_f1 = _aggregate(acast_results, level="ad")
+        br_matched, br_pred, br_exp, br_p, br_r, br_f1 = _aggregate(acast_results, level="break")
         per_model.append(
             ModelRunSummary(
                 model=None,
                 provider="acast",
                 case_count=len(acast_results),
-                total_matched=matched,
-                total_predicted=predicted,
-                total_expected=expected,
-                precision=p,
-                recall=r,
-                f1=f1,
+                total_matched=ad_matched,
+                total_predicted=ad_pred,
+                total_expected=ad_exp,
+                precision=ad_p,
+                recall=ad_r,
+                f1=ad_f1,
+                name_similarity_mean=_mean_name_similarity(acast_results),
+                break_total_matched=br_matched,
+                break_total_predicted=br_pred,
+                break_total_expected=br_exp,
+                break_precision=br_p,
+                break_recall=br_r,
+                break_f1=br_f1,
                 total_cost_usd=0.0,
                 total_input_tokens=0,
                 total_output_tokens=0,

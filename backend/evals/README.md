@@ -24,14 +24,16 @@ included in the eval pipeline.)
 
 ## Configuration
 
-API keys live in `backend/.env` (git-ignored). Copy the example and fill in:
+API keys live in `backend/.env.evals` (git-ignored). Copy the example and fill in:
 
 ```bash
-cp backend/.env.example backend/.env
+cp backend/.env.evals.example backend/.env.evals
 # set GEMINI_API_KEY=...
 ```
 
-The CLI loads `backend/.env` automatically.
+Kept separate from the app's `backend/.env` so pydantic-settings (which only
+recognises infra config) doesn't reject API-key keys it doesn't know about.
+The CLI loads `backend/.env.evals` automatically on every run.
 
 ## Running
 
@@ -88,11 +90,12 @@ iou_threshold = 0.75               # tighter matching for this case
 
 ### Field reference
 
-| `[run]`            | Type    | Default       | Notes                                       |
-|--------------------|---------|---------------|---------------------------------------------|
-| `name`             | string  | file stem     | Used in the report filename                 |
-| `iou_threshold`    | float   | `0.5`         | Default IoU for matching                    |
-| `use_acast`        | bool    | `false`       | Default `use_acast` for cases below         |
+| `[run]`                  | Type    | Default       | Notes                                       |
+|--------------------------|---------|---------------|---------------------------------------------|
+| `name`                   | string  | file stem     | Used in the report filename                 |
+| `iou_threshold`          | float   | `0.5`         | Default IoU for matching                    |
+| `use_acast`              | bool    | `false`       | Default `use_acast` for cases below         |
+| `break_cluster_gap_s`    | float   | `5.0`         | Max gap (s) for merging ads into one break  |
 
 | `[[models]]`       | Type    | Required      | Notes                                       |
 |--------------------|---------|---------------|---------------------------------------------|
@@ -100,13 +103,14 @@ iou_threshold = 0.75               # tighter matching for this case
 | `provider`         | string  | one form req. | Alternative to `spec`                       |
 | `model`            | string  | one form req. | Alternative to `spec`                       |
 
-| `[[cases]]`        | Type    | Required      | Notes                                       |
-|--------------------|---------|---------------|---------------------------------------------|
-| `id`               | string  | yes           | Must match `evals/fixtures/<id>/`           |
-| `podcast`          | string  | no            | Informational                               |
-| `custom_prompt`    | string  | no            | Per-case AI instructions (AI mode only)     |
-| `use_acast`        | bool    | no            | Overrides `[run].use_acast`                 |
-| `iou_threshold`    | float   | no            | Overrides `[run].iou_threshold`             |
+| `[[cases]]`              | Type    | Required      | Notes                                       |
+|--------------------------|---------|---------------|---------------------------------------------|
+| `id`                     | string  | yes           | Must match `evals/fixtures/<id>/`           |
+| `podcast`                | string  | no            | Informational                               |
+| `custom_prompt`          | string  | no            | Per-case AI instructions (AI mode only)     |
+| `use_acast`              | bool    | no            | Overrides `[run].use_acast`                 |
+| `iou_threshold`          | float   | no            | Overrides `[run].iou_threshold`             |
+| `break_cluster_gap_s`    | float   | no            | Overrides `[run].break_cluster_gap_s`       |
 
 Unknown keys are rejected so typos surface early.
 
@@ -141,12 +145,25 @@ evals/fixtures/<case-id>/
 ]
 ```
 
-`expected.json` — array of `CutRegion` (times as seconds or `HH:MM:SS.mmm`):
+`expected.json` — array of ground-truth ad entries (times as seconds or
+`HH:MM:SS.mmm`):
 ```json
 [
-  {"start_time": "00:00:13.000", "end_time": "00:01:33.000", "label": "Sponsor block"}
+  {"start_time": "0.0", "end_time": "29.0", "label": "Ticumbo"},
+  {"start_time": "205.844", "end_time": "315.539", "label": "SC Libero", "optional": true}
 ]
 ```
+
+The optional `optional` field (default `false`) flags ground-truth ads that
+the model is free to either find or skip — useful for ads with fuzzy
+boundaries (host-read self-promo, segues without clean audio markers):
+
+- If the model **predicts** an optional ad → absorbed (no FP penalty, no TP credit).
+- If the model **misses** an optional ad → not counted as FN.
+- If matched, the name-similarity score still records the pair.
+
+Use this when you want the fixture to *describe* an ad break without
+committing to a verdict on whether it should be cut.
 
 ## Seeding a fixture from a real episode
 
@@ -164,20 +181,57 @@ episode under `../_podcasts/<show>/`:
 
 ## Metrics
 
-For each case (per model):
+Every case is scored at **two layers**, both reported separately:
 
-| Metric              | Meaning                                                              |
-|---------------------|----------------------------------------------------------------------|
-| `P` (precision)     | Of all predicted cut regions, fraction matching a ground-truth one   |
-| `R` (recall)        | Of all ground-truth cut regions, fraction matched by a prediction    |
-| `F1`                | Harmonic mean of P and R                                             |
-| `dur-P`             | Of predicted seconds, fraction inside ground-truth cuts              |
-| `dur-R`             | Of ground-truth seconds, fraction covered by predictions             |
-| `FP` / `FN`         | False positives / false negatives — see report JSON for full spans   |
+### Ad-level (granular, individual adverts)
 
-Matching is greedy 1-to-1 by descending IoU at the configured threshold.
-Aggregate P/R/F1 across cases is the micro-average (sum of matches over sum
-of predictions/expected).
+Measures how well the model picks out individual adverts: count, boundaries,
+and the advertiser/brand name.
+
+| Metric        | Meaning                                                            |
+|---------------|--------------------------------------------------------------------|
+| `ad-P`        | Of all predicted ads, fraction matching a ground-truth ad          |
+| `ad-R`        | Of all ground-truth ads, fraction matched by a prediction          |
+| `ad-F1`       | Harmonic mean of `ad-P` and `ad-R`                                 |
+| `name`        | Mean token-set F1 between predicted/expected advertiser names      |
+| `FP` / `FN`   | Granular false positives / false negatives                         |
+
+`name` is computed only over matched pairs. Names are lowercased and split
+on non-alphanumerics; the score is `2·|A ∩ B| / (|A| + |B|)` over the token
+sets. `Monday.com` ↔ `monday.com` → 1.0; `Microsoft 365 Copilot` ↔ `Copilot`
+→ 0.5; `Cadbury` ↔ `Monday` → 0.
+
+### Break-level (merged ad breaks)
+
+Measures how well the *cut audio* would line up — touching ads (gap ≤
+`break_cluster_gap_s`, default 5s) are merged into a single ad-break region
+in both prediction and ground truth, then scored.
+
+| Metric        | Meaning                                                            |
+|---------------|--------------------------------------------------------------------|
+| `brk-P`       | Of merged predicted breaks, fraction matching a ground-truth break |
+| `brk-R`       | Of merged ground-truth breaks, fraction matched by a prediction    |
+| `brk-F1`      | Harmonic mean of `brk-P` and `brk-R`                               |
+| `dur-P`       | Of merged-predicted seconds, fraction inside ground-truth breaks   |
+| `dur-R`       | Of merged ground-truth seconds, covered by merged predictions      |
+
+This is the layer that asks "did we cut from the start of the first ad in
+the break to the end of the last ad?". A model that emits one big region
+covering a 3-ad break will score perfectly here, even though its `ad-F1`
+will be 0 against the granular ground truth.
+
+### Configuration
+
+| Key                          | Default | Notes                                       |
+|------------------------------|---------|---------------------------------------------|
+| `iou_threshold`              | `0.5`   | IoU at which two regions are a match        |
+| `break_cluster_gap_s`        | `5.0`   | Gap (s) below which two ads are one break   |
+
+Both can be set at run level and overridden per case.
+
+Matching at either layer is greedy 1-to-1 by descending IoU. Aggregate
+P/R/F1 across cases is the micro-average (sum of matches over sum of
+predictions/expected).
 
 Acast cases produce the same result regardless of model (the model is not
 used) and are shared across each model's aggregate.

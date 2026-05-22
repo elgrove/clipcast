@@ -1,0 +1,1192 @@
+{
+  "name": "flash-vs-lite",
+  "iou_threshold": 0.5,
+  "use_acast_default": false,
+  "break_cluster_gap_s": 5.0,
+  "models": [
+    "gemini:gemini-2.5-flash",
+    "gemini:gemini-2.5-flash-lite"
+  ],
+  "cases": [
+    {
+      "id": "cult-of-the-manager-2026-05-05",
+      "podcast": "TBD",
+      "use_acast": false,
+      "iou_threshold": null,
+      "break_cluster_gap_s": null
+    },
+    {
+      "id": "guardiola-leaves-2026-05-19",
+      "podcast": "TBD",
+      "use_acast": false,
+      "iou_threshold": null,
+      "break_cluster_gap_s": null
+    }
+  ],
+  "per_model": [
+    {
+      "model": "gemini:gemini-2.5-flash",
+      "provider": "gemini",
+      "case_count": 2,
+      "total_matched": 13,
+      "total_predicted": 19,
+      "total_expected": 19,
+      "precision": 0.6842105263157895,
+      "recall": 0.6842105263157895,
+      "f1": 0.6842105263157895,
+      "name_similarity_mean": 0.5384615384615384,
+      "break_total_matched": 7,
+      "break_total_predicted": 7,
+      "break_total_expected": 7,
+      "break_precision": 1.0,
+      "break_recall": 1.0,
+      "break_f1": 1.0,
+      "total_cost_usd": 0.0,
+      "total_input_tokens": 205406,
+      "total_output_tokens": 17064,
+      "total_duration_s": 72.16844714339823,
+      "results": [
+        {
+          "case_id": "cult-of-the-manager-2026-05-05",
+          "iou_threshold": 0.5,
+          "use_acast": false,
+          "break_cluster_gap_s": 5.0,
+          "model": "gemini:gemini-2.5-flash",
+          "provider": "gemini",
+          "predicted": [
+            {
+              "start_time": 10.72,
+              "end_time": 29.0,
+              "label": "Ticumbo"
+            },
+            {
+              "start_time": 30.16,
+              "end_time": 57.44,
+              "label": "We Buy Any Car"
+            },
+            {
+              "start_time": 60.48,
+              "end_time": 75.92,
+              "label": "monday.com"
+            },
+            {
+              "start_time": 2210.28,
+              "end_time": 2237.08,
+              "label": "Abercrombie"
+            },
+            {
+              "start_time": 2237.08,
+              "end_time": 2272.28,
+              "label": "Marketreach"
+            },
+            {
+              "start_time": 3547.56,
+              "end_time": 3585.72,
+              "label": "We Buy Any Car"
+            },
+            {
+              "start_time": 3585.72,
+              "end_time": 3606.68,
+              "label": "Bloomberg"
+            }
+          ],
+          "expected": [
+            {
+              "start_time": 0.0,
+              "end_time": 29.0,
+              "label": "Ticumbo",
+              "optional": false
+            },
+            {
+              "start_time": 30.16,
+              "end_time": 57.44,
+              "label": "We Buy Any Car",
+              "optional": false
+            },
+            {
+              "start_time": 60.48,
+              "end_time": 75.92,
+              "label": "monday.com",
+              "optional": false
+            },
+            {
+              "start_time": 205.844,
+              "end_time": 315.539,
+              "label": "SC Libero (membership)",
+              "optional": true
+            },
+            {
+              "start_time": 2214.01,
+              "end_time": 2237.08,
+              "label": "Abercrombie",
+              "optional": false
+            },
+            {
+              "start_time": 2237.08,
+              "end_time": 2272.1,
+              "label": "Marketreach",
+              "optional": false
+            },
+            {
+              "start_time": 3558.07,
+              "end_time": 3585.72,
+              "label": "We Buy Any Car",
+              "optional": false
+            },
+            {
+              "start_time": 3585.72,
+              "end_time": 3607.32,
+              "label": "Bloomberg",
+              "optional": false
+            }
+          ],
+          "matched": 7,
+          "expected_required_count": 7,
+          "expected_optional_count": 1,
+          "precision": 1.0,
+          "recall": 1.0,
+          "f1": 1.0,
+          "duration_precision": 0.9208214364155473,
+          "duration_coverage": 0.936557578465317,
+          "false_positives": [],
+          "false_negatives": [],
+          "absorbed": [],
+          "unmatched_optional": [
+            {
+              "start_time": 205.844,
+              "end_time": 315.539,
+              "label": "SC Libero (membership)",
+              "optional": true
+            }
+          ],
+          "name_matches": [
+            {
+              "predicted": "monday.com",
+              "expected": "monday.com",
+              "similarity": 1.0,
+              "optional": false
+            },
+            {
+              "predicted": "We Buy Any Car",
+              "expected": "We Buy Any Car",
+              "similarity": 1.0,
+              "optional": false
+            },
+            {
+              "predicted": "Marketreach",
+              "expected": "Marketreach",
+              "similarity": 1.0,
+              "optional": false
+            },
+            {
+              "predicted": "Bloomberg",
+              "expected": "Bloomberg",
+              "similarity": 1.0,
+              "optional": false
+            },
+            {
+              "predicted": "Abercrombie",
+              "expected": "Abercrombie",
+              "similarity": 1.0,
+              "optional": false
+            },
+            {
+              "predicted": "We Buy Any Car",
+              "expected": "We Buy Any Car",
+              "similarity": 1.0,
+              "optional": false
+            },
+            {
+              "predicted": "Ticumbo",
+              "expected": "Ticumbo",
+              "similarity": 1.0,
+              "optional": false
+            }
+          ],
+          "name_similarity_mean": 1.0,
+          "predicted_breaks": [
+            {
+              "start_time": 10.72,
+              "end_time": 75.92,
+              "label": "Ticumbo; We Buy Any Car; monday.com",
+              "optional": false
+            },
+            {
+              "start_time": 2210.28,
+              "end_time": 2272.28,
+              "label": "Abercrombie; Marketreach",
+              "optional": false
+            },
+            {
+              "start_time": 3547.56,
+              "end_time": 3606.68,
+              "label": "We Buy Any Car; Bloomberg",
+              "optional": false
+            }
+          ],
+          "expected_breaks": [
+            {
+              "start_time": 0.0,
+              "end_time": 75.92,
+              "label": "Ticumbo; We Buy Any Car; monday.com",
+              "optional": false
+            },
+            {
+              "start_time": 205.844,
+              "end_time": 315.539,
+              "label": "SC Libero (membership)",
+              "optional": true
+            },
+            {
+              "start_time": 2214.01,
+              "end_time": 2272.1,
+              "label": "Abercrombie; Marketreach",
+              "optional": false
+            },
+            {
+              "start_time": 3558.07,
+              "end_time": 3607.32,
+              "label": "We Buy Any Car; Bloomberg",
+              "optional": false
+            }
+          ],
+          "break_matched": 3,
+          "break_expected_required_count": 3,
+          "break_expected_optional_count": 1,
+          "break_precision": 1.0,
+          "break_recall": 1.0,
+          "break_f1": 1.0,
+          "break_duration_precision": 0.9226062687848834,
+          "break_duration_coverage": 0.938011568263667,
+          "break_false_positives": [],
+          "break_false_negatives": [],
+          "break_absorbed": [],
+          "break_unmatched_optional": [
+            {
+              "start_time": 205.844,
+              "end_time": 315.539,
+              "label": "SC Libero (membership)",
+              "optional": true
+            }
+          ],
+          "audio_duration_s": null,
+          "raw_ident_count": null,
+          "unpaired_idents": null,
+          "cost_usd": 0.0,
+          "input_tokens": 76494,
+          "output_tokens": 6400,
+          "duration_seconds": 26.151089949533343,
+          "error": null
+        },
+        {
+          "case_id": "guardiola-leaves-2026-05-19",
+          "iou_threshold": 0.5,
+          "use_acast": false,
+          "break_cluster_gap_s": 5.0,
+          "model": "gemini:gemini-2.5-flash",
+          "provider": "gemini",
+          "predicted": [
+            {
+              "start_time": 5.68,
+              "end_time": 48.1,
+              "label": "Eat Natural Fruit and Nut Bars"
+            },
+            {
+              "start_time": 48.1,
+              "end_time": 79.31,
+              "label": "Santander"
+            },
+            {
+              "start_time": 79.31,
+              "end_time": 107.6,
+              "label": "Eonnext"
+            },
+            {
+              "start_time": 1695.36,
+              "end_time": 1724.24,
+              "label": "Eonnext"
+            },
+            {
+              "start_time": 1724.24,
+              "end_time": 1766.16,
+              "label": "Tuwie Holidays"
+            },
+            {
+              "start_time": 1766.16,
+              "end_time": 1797.04,
+              "label": "Clana"
+            },
+            {
+              "start_time": 3113.2,
+              "end_time": 3144.82,
+              "label": "Eonnext"
+            },
+            {
+              "start_time": 3144.82,
+              "end_time": 3172.74,
+              "label": "Border Biscuits"
+            },
+            {
+              "start_time": 3172.74,
+              "end_time": 3201.04,
+              "label": "Bluebird Care"
+            },
+            {
+              "start_time": 4958.12,
+              "end_time": 4985.8,
+              "label": "Border Biscuits"
+            },
+            {
+              "start_time": 4985.8,
+              "end_time": 5016.04,
+              "label": "A.E. Tuition"
+            },
+            {
+              "start_time": 5016.04,
+              "end_time": 5045.6,
+              "label": "Bluebird Care"
+            }
+          ],
+          "expected": [
+            {
+              "start_time": 0.0,
+              "end_time": 29.92,
+              "label": "Cadbury",
+              "optional": false
+            },
+            {
+              "start_time": 30.24,
+              "end_time": 61.09,
+              "label": "Monday.com",
+              "optional": false
+            },
+            {
+              "start_time": 61.09,
+              "end_time": 92.6,
+              "label": "Starling Bank",
+              "optional": false
+            },
+            {
+              "start_time": 1674.434,
+              "end_time": 1718.554,
+              "label": "Tui",
+              "optional": false
+            },
+            {
+              "start_time": 1721.834,
+              "end_time": 1748.674,
+              "label": "Starling Bank",
+              "optional": false
+            },
+            {
+              "start_time": 1748.674,
+              "end_time": 1781.054,
+              "label": "Cadbury",
+              "optional": false
+            },
+            {
+              "start_time": 3093.0,
+              "end_time": 3125.513,
+              "label": "Microsoft 365 Copilot",
+              "optional": false
+            },
+            {
+              "start_time": 3125.513,
+              "end_time": 3167.453,
+              "label": "Tui",
+              "optional": false
+            },
+            {
+              "start_time": 3167.453,
+              "end_time": 3214.258,
+              "label": "Vauxhall Electric Vans",
+              "optional": false
+            },
+            {
+              "start_time": 4965.14,
+              "end_time": 4997.305,
+              "label": "Swiss",
+              "optional": false
+            },
+            {
+              "start_time": 4997.305,
+              "end_time": 5017.545,
+              "label": "McDonald's",
+              "optional": false
+            },
+            {
+              "start_time": 5017.545,
+              "end_time": 5047.353,
+              "label": "Vanta",
+              "optional": false
+            }
+          ],
+          "matched": 6,
+          "expected_required_count": 12,
+          "expected_optional_count": 0,
+          "precision": 0.5,
+          "recall": 0.5,
+          "f1": 0.5,
+          "duration_precision": 0.890198458777578,
+          "duration_coverage": 0.8452057300214756,
+          "false_positives": [
+            {
+              "start_time": 48.1,
+              "end_time": 79.31,
+              "label": "Santander"
+            },
+            {
+              "start_time": 79.31,
+              "end_time": 107.6,
+              "label": "Eonnext"
+            },
+            {
+              "start_time": 1695.36,
+              "end_time": 1724.24,
+              "label": "Eonnext"
+            },
+            {
+              "start_time": 1766.16,
+              "end_time": 1797.04,
+              "label": "Clana"
+            },
+            {
+              "start_time": 3113.2,
+              "end_time": 3144.82,
+              "label": "Eonnext"
+            },
+            {
+              "start_time": 3144.82,
+              "end_time": 3172.74,
+              "label": "Border Biscuits"
+            }
+          ],
+          "false_negatives": [
+            {
+              "start_time": 30.24,
+              "end_time": 61.09,
+              "label": "Monday.com",
+              "optional": false
+            },
+            {
+              "start_time": 61.09,
+              "end_time": 92.6,
+              "label": "Starling Bank",
+              "optional": false
+            },
+            {
+              "start_time": 1674.434,
+              "end_time": 1718.554,
+              "label": "Tui",
+              "optional": false
+            },
+            {
+              "start_time": 1748.674,
+              "end_time": 1781.054,
+              "label": "Cadbury",
+              "optional": false
+            },
+            {
+              "start_time": 3093.0,
+              "end_time": 3125.513,
+              "label": "Microsoft 365 Copilot",
+              "optional": false
+            },
+            {
+              "start_time": 3125.513,
+              "end_time": 3167.453,
+              "label": "Tui",
+              "optional": false
+            }
+          ],
+          "absorbed": [],
+          "unmatched_optional": [],
+          "name_matches": [
+            {
+              "predicted": "Bluebird Care",
+              "expected": "Vanta",
+              "similarity": 0.0,
+              "optional": false
+            },
+            {
+              "predicted": "Bluebird Care",
+              "expected": "Vauxhall Electric Vans",
+              "similarity": 0.0,
+              "optional": false
+            },
+            {
+              "predicted": "A.E. Tuition",
+              "expected": "McDonald's",
+              "similarity": 0.0,
+              "optional": false
+            },
+            {
+              "predicted": "Tuwie Holidays",
+              "expected": "Starling Bank",
+              "similarity": 0.0,
+              "optional": false
+            },
+            {
+              "predicted": "Border Biscuits",
+              "expected": "Swiss",
+              "similarity": 0.0,
+              "optional": false
+            },
+            {
+              "predicted": "Eat Natural Fruit and Nut Bars",
+              "expected": "Cadbury",
+              "similarity": 0.0,
+              "optional": false
+            }
+          ],
+          "name_similarity_mean": 0.0,
+          "predicted_breaks": [
+            {
+              "start_time": 5.68,
+              "end_time": 107.6,
+              "label": "Eat Natural Fruit and Nut Bars; Santander; Eonnext",
+              "optional": false
+            },
+            {
+              "start_time": 1695.36,
+              "end_time": 1797.04,
+              "label": "Eonnext; Tuwie Holidays; Clana",
+              "optional": false
+            },
+            {
+              "start_time": 3113.2,
+              "end_time": 3201.04,
+              "label": "Eonnext; Border Biscuits; Bluebird Care",
+              "optional": false
+            },
+            {
+              "start_time": 4958.12,
+              "end_time": 5045.6,
+              "label": "Border Biscuits; A.E. Tuition; Bluebird Care",
+              "optional": false
+            }
+          ],
+          "expected_breaks": [
+            {
+              "start_time": 0.0,
+              "end_time": 92.6,
+              "label": "Cadbury; Monday.com; Starling Bank",
+              "optional": false
+            },
+            {
+              "start_time": 1674.434,
+              "end_time": 1781.054,
+              "label": "Tui; Starling Bank; Cadbury",
+              "optional": false
+            },
+            {
+              "start_time": 3093.0,
+              "end_time": 3214.258,
+              "label": "Microsoft 365 Copilot; Tui; Vauxhall Electric Vans",
+              "optional": false
+            },
+            {
+              "start_time": 4965.14,
+              "end_time": 5047.353,
+              "label": "Swiss; McDonald's; Vanta",
+              "optional": false
+            }
+          ],
+          "break_matched": 4,
+          "break_expected_required_count": 4,
+          "break_expected_optional_count": 0,
+          "break_precision": 1.0,
+          "break_recall": 1.0,
+          "break_f1": 1.0,
+          "break_duration_precision": 0.8996991449382449,
+          "break_duration_coverage": 0.8465895686767287,
+          "break_false_positives": [],
+          "break_false_negatives": [],
+          "break_absorbed": [],
+          "break_unmatched_optional": [],
+          "audio_duration_s": null,
+          "raw_ident_count": null,
+          "unpaired_idents": null,
+          "cost_usd": 0.0,
+          "input_tokens": 128912,
+          "output_tokens": 10664,
+          "duration_seconds": 46.01735719386488,
+          "error": null
+        }
+      ]
+    },
+    {
+      "model": "gemini:gemini-2.5-flash-lite",
+      "provider": "gemini",
+      "case_count": 2,
+      "total_matched": 11,
+      "total_predicted": 16,
+      "total_expected": 19,
+      "precision": 0.6875,
+      "recall": 0.5789473684210527,
+      "f1": 0.6285714285714286,
+      "name_similarity_mean": 0.5454545454545454,
+      "break_total_matched": 6,
+      "break_total_predicted": 6,
+      "break_total_expected": 7,
+      "break_precision": 1.0,
+      "break_recall": 0.8571428571428571,
+      "break_f1": 0.923076923076923,
+      "total_cost_usd": 0.0,
+      "total_input_tokens": 205406,
+      "total_output_tokens": 1827,
+      "total_duration_s": 5.240196165628731,
+      "results": [
+        {
+          "case_id": "cult-of-the-manager-2026-05-05",
+          "iou_threshold": 0.5,
+          "use_acast": false,
+          "break_cluster_gap_s": 5.0,
+          "model": "gemini:gemini-2.5-flash-lite",
+          "provider": "gemini",
+          "predicted": [
+            {
+              "start_time": 10.72,
+              "end_time": 29.0,
+              "label": "Ticumbo"
+            },
+            {
+              "start_time": 30.16,
+              "end_time": 57.44,
+              "label": "We Buy Any Car"
+            },
+            {
+              "start_time": 60.48,
+              "end_time": 75.92,
+              "label": "Monday.com"
+            },
+            {
+              "start_time": 2210.28,
+              "end_time": 2237.08,
+              "label": "Abercrombie"
+            },
+            {
+              "start_time": 2237.08,
+              "end_time": 2272.28,
+              "label": "Door Drop"
+            },
+            {
+              "start_time": 3547.56,
+              "end_time": 3585.72,
+              "label": "We Buy Any Car"
+            },
+            {
+              "start_time": 3585.72,
+              "end_time": 3606.68,
+              "label": "Bloomberg"
+            }
+          ],
+          "expected": [
+            {
+              "start_time": 0.0,
+              "end_time": 29.0,
+              "label": "Ticumbo",
+              "optional": false
+            },
+            {
+              "start_time": 30.16,
+              "end_time": 57.44,
+              "label": "We Buy Any Car",
+              "optional": false
+            },
+            {
+              "start_time": 60.48,
+              "end_time": 75.92,
+              "label": "monday.com",
+              "optional": false
+            },
+            {
+              "start_time": 205.844,
+              "end_time": 315.539,
+              "label": "SC Libero (membership)",
+              "optional": true
+            },
+            {
+              "start_time": 2214.01,
+              "end_time": 2237.08,
+              "label": "Abercrombie",
+              "optional": false
+            },
+            {
+              "start_time": 2237.08,
+              "end_time": 2272.1,
+              "label": "Marketreach",
+              "optional": false
+            },
+            {
+              "start_time": 3558.07,
+              "end_time": 3585.72,
+              "label": "We Buy Any Car",
+              "optional": false
+            },
+            {
+              "start_time": 3585.72,
+              "end_time": 3607.32,
+              "label": "Bloomberg",
+              "optional": false
+            }
+          ],
+          "matched": 7,
+          "expected_required_count": 7,
+          "expected_optional_count": 1,
+          "precision": 1.0,
+          "recall": 1.0,
+          "f1": 1.0,
+          "duration_precision": 0.9208214364155473,
+          "duration_coverage": 0.936557578465317,
+          "false_positives": [],
+          "false_negatives": [],
+          "absorbed": [],
+          "unmatched_optional": [
+            {
+              "start_time": 205.844,
+              "end_time": 315.539,
+              "label": "SC Libero (membership)",
+              "optional": true
+            }
+          ],
+          "name_matches": [
+            {
+              "predicted": "Monday.com",
+              "expected": "monday.com",
+              "similarity": 1.0,
+              "optional": false
+            },
+            {
+              "predicted": "We Buy Any Car",
+              "expected": "We Buy Any Car",
+              "similarity": 1.0,
+              "optional": false
+            },
+            {
+              "predicted": "Door Drop",
+              "expected": "Marketreach",
+              "similarity": 0.0,
+              "optional": false
+            },
+            {
+              "predicted": "Bloomberg",
+              "expected": "Bloomberg",
+              "similarity": 1.0,
+              "optional": false
+            },
+            {
+              "predicted": "Abercrombie",
+              "expected": "Abercrombie",
+              "similarity": 1.0,
+              "optional": false
+            },
+            {
+              "predicted": "We Buy Any Car",
+              "expected": "We Buy Any Car",
+              "similarity": 1.0,
+              "optional": false
+            },
+            {
+              "predicted": "Ticumbo",
+              "expected": "Ticumbo",
+              "similarity": 1.0,
+              "optional": false
+            }
+          ],
+          "name_similarity_mean": 0.8571428571428571,
+          "predicted_breaks": [
+            {
+              "start_time": 10.72,
+              "end_time": 75.92,
+              "label": "Ticumbo; We Buy Any Car; Monday.com",
+              "optional": false
+            },
+            {
+              "start_time": 2210.28,
+              "end_time": 2272.28,
+              "label": "Abercrombie; Door Drop",
+              "optional": false
+            },
+            {
+              "start_time": 3547.56,
+              "end_time": 3606.68,
+              "label": "We Buy Any Car; Bloomberg",
+              "optional": false
+            }
+          ],
+          "expected_breaks": [
+            {
+              "start_time": 0.0,
+              "end_time": 75.92,
+              "label": "Ticumbo; We Buy Any Car; monday.com",
+              "optional": false
+            },
+            {
+              "start_time": 205.844,
+              "end_time": 315.539,
+              "label": "SC Libero (membership)",
+              "optional": true
+            },
+            {
+              "start_time": 2214.01,
+              "end_time": 2272.1,
+              "label": "Abercrombie; Marketreach",
+              "optional": false
+            },
+            {
+              "start_time": 3558.07,
+              "end_time": 3607.32,
+              "label": "We Buy Any Car; Bloomberg",
+              "optional": false
+            }
+          ],
+          "break_matched": 3,
+          "break_expected_required_count": 3,
+          "break_expected_optional_count": 1,
+          "break_precision": 1.0,
+          "break_recall": 1.0,
+          "break_f1": 1.0,
+          "break_duration_precision": 0.9226062687848834,
+          "break_duration_coverage": 0.938011568263667,
+          "break_false_positives": [],
+          "break_false_negatives": [],
+          "break_absorbed": [],
+          "break_unmatched_optional": [
+            {
+              "start_time": 205.844,
+              "end_time": 315.539,
+              "label": "SC Libero (membership)",
+              "optional": true
+            }
+          ],
+          "audio_duration_s": null,
+          "raw_ident_count": null,
+          "unpaired_idents": null,
+          "cost_usd": 0.0,
+          "input_tokens": 76494,
+          "output_tokens": 756,
+          "duration_seconds": 2.0819811867550015,
+          "error": null
+        },
+        {
+          "case_id": "guardiola-leaves-2026-05-19",
+          "iou_threshold": 0.5,
+          "use_acast": false,
+          "break_cluster_gap_s": 5.0,
+          "model": "gemini:gemini-2.5-flash-lite",
+          "provider": "gemini",
+          "predicted": [
+            {
+              "start_time": 4.44,
+              "end_time": 48.1,
+              "label": "Eat Natural Fruit and Nut Bars"
+            },
+            {
+              "start_time": 48.1,
+              "end_time": 76.24,
+              "label": "Santander mortgages"
+            },
+            {
+              "start_time": 76.24,
+              "end_time": 105.92,
+              "label": "E.ON Next"
+            },
+            {
+              "start_time": 1686.24,
+              "end_time": 1724.24,
+              "label": "E.ON Next"
+            },
+            {
+              "start_time": 1724.24,
+              "end_time": 1766.16,
+              "label": "Tuwie Holidays"
+            },
+            {
+              "start_time": 1766.16,
+              "end_time": 1795.2,
+              "label": "Clana"
+            },
+            {
+              "start_time": 4958.12,
+              "end_time": 4979.8,
+              "label": "Border Biscuits"
+            },
+            {
+              "start_time": 4979.8,
+              "end_time": 5016.04,
+              "label": "A.E. Tuition"
+            },
+            {
+              "start_time": 5016.04,
+              "end_time": 5045.6,
+              "label": "Bluebird Care"
+            }
+          ],
+          "expected": [
+            {
+              "start_time": 0.0,
+              "end_time": 29.92,
+              "label": "Cadbury",
+              "optional": false
+            },
+            {
+              "start_time": 30.24,
+              "end_time": 61.09,
+              "label": "Monday.com",
+              "optional": false
+            },
+            {
+              "start_time": 61.09,
+              "end_time": 92.6,
+              "label": "Starling Bank",
+              "optional": false
+            },
+            {
+              "start_time": 1674.434,
+              "end_time": 1718.554,
+              "label": "Tui",
+              "optional": false
+            },
+            {
+              "start_time": 1721.834,
+              "end_time": 1748.674,
+              "label": "Starling Bank",
+              "optional": false
+            },
+            {
+              "start_time": 1748.674,
+              "end_time": 1781.054,
+              "label": "Cadbury",
+              "optional": false
+            },
+            {
+              "start_time": 3093.0,
+              "end_time": 3125.513,
+              "label": "Microsoft 365 Copilot",
+              "optional": false
+            },
+            {
+              "start_time": 3125.513,
+              "end_time": 3167.453,
+              "label": "Tui",
+              "optional": false
+            },
+            {
+              "start_time": 3167.453,
+              "end_time": 3214.258,
+              "label": "Vauxhall Electric Vans",
+              "optional": false
+            },
+            {
+              "start_time": 4965.14,
+              "end_time": 4997.305,
+              "label": "Swiss",
+              "optional": false
+            },
+            {
+              "start_time": 4997.305,
+              "end_time": 5017.545,
+              "label": "McDonald's",
+              "optional": false
+            },
+            {
+              "start_time": 5017.545,
+              "end_time": 5047.353,
+              "label": "Vanta",
+              "optional": false
+            }
+          ],
+          "matched": 4,
+          "expected_required_count": 12,
+          "expected_optional_count": 0,
+          "precision": 0.4444444444444444,
+          "recall": 0.3333333333333333,
+          "f1": 0.380952380952381,
+          "duration_precision": 0.8721603114930173,
+          "duration_coverage": 0.6510645441766424,
+          "false_positives": [
+            {
+              "start_time": 48.1,
+              "end_time": 76.24,
+              "label": "Santander mortgages"
+            },
+            {
+              "start_time": 76.24,
+              "end_time": 105.92,
+              "label": "E.ON Next"
+            },
+            {
+              "start_time": 1766.16,
+              "end_time": 1795.2,
+              "label": "Clana"
+            },
+            {
+              "start_time": 4958.12,
+              "end_time": 4979.8,
+              "label": "Border Biscuits"
+            },
+            {
+              "start_time": 4979.8,
+              "end_time": 5016.04,
+              "label": "A.E. Tuition"
+            }
+          ],
+          "false_negatives": [
+            {
+              "start_time": 30.24,
+              "end_time": 61.09,
+              "label": "Monday.com",
+              "optional": false
+            },
+            {
+              "start_time": 61.09,
+              "end_time": 92.6,
+              "label": "Starling Bank",
+              "optional": false
+            },
+            {
+              "start_time": 1748.674,
+              "end_time": 1781.054,
+              "label": "Cadbury",
+              "optional": false
+            },
+            {
+              "start_time": 3093.0,
+              "end_time": 3125.513,
+              "label": "Microsoft 365 Copilot",
+              "optional": false
+            },
+            {
+              "start_time": 3125.513,
+              "end_time": 3167.453,
+              "label": "Tui",
+              "optional": false
+            },
+            {
+              "start_time": 3167.453,
+              "end_time": 3214.258,
+              "label": "Vauxhall Electric Vans",
+              "optional": false
+            },
+            {
+              "start_time": 4965.14,
+              "end_time": 4997.305,
+              "label": "Swiss",
+              "optional": false
+            },
+            {
+              "start_time": 4997.305,
+              "end_time": 5017.545,
+              "label": "McDonald's",
+              "optional": false
+            }
+          ],
+          "absorbed": [],
+          "unmatched_optional": [],
+          "name_matches": [
+            {
+              "predicted": "Bluebird Care",
+              "expected": "Vanta",
+              "similarity": 0.0,
+              "optional": false
+            },
+            {
+              "predicted": "E.ON Next",
+              "expected": "Tui",
+              "similarity": 0.0,
+              "optional": false
+            },
+            {
+              "predicted": "Tuwie Holidays",
+              "expected": "Starling Bank",
+              "similarity": 0.0,
+              "optional": false
+            },
+            {
+              "predicted": "Eat Natural Fruit and Nut Bars",
+              "expected": "Cadbury",
+              "similarity": 0.0,
+              "optional": false
+            }
+          ],
+          "name_similarity_mean": 0.0,
+          "predicted_breaks": [
+            {
+              "start_time": 4.44,
+              "end_time": 105.92,
+              "label": "Eat Natural Fruit and Nut Bars; Santander mortgages; E.ON Next",
+              "optional": false
+            },
+            {
+              "start_time": 1686.24,
+              "end_time": 1795.2,
+              "label": "E.ON Next; Tuwie Holidays; Clana",
+              "optional": false
+            },
+            {
+              "start_time": 4958.12,
+              "end_time": 5045.6,
+              "label": "Border Biscuits; A.E. Tuition; Bluebird Care",
+              "optional": false
+            }
+          ],
+          "expected_breaks": [
+            {
+              "start_time": 0.0,
+              "end_time": 92.6,
+              "label": "Cadbury; Monday.com; Starling Bank",
+              "optional": false
+            },
+            {
+              "start_time": 1674.434,
+              "end_time": 1781.054,
+              "label": "Tui; Starling Bank; Cadbury",
+              "optional": false
+            },
+            {
+              "start_time": 3093.0,
+              "end_time": 3214.258,
+              "label": "Microsoft 365 Copilot; Tui; Vauxhall Electric Vans",
+              "optional": false
+            },
+            {
+              "start_time": 4965.14,
+              "end_time": 5047.353,
+              "label": "Swiss; McDonald's; Vanta",
+              "optional": false
+            }
+          ],
+          "break_matched": 3,
+          "break_expected_required_count": 4,
+          "break_expected_optional_count": 0,
+          "break_precision": 1.0,
+          "break_recall": 0.75,
+          "break_f1": 0.8571428571428571,
+          "break_duration_precision": 0.8842440923737903,
+          "break_duration_coverage": 0.6541839772927637,
+          "break_false_positives": [],
+          "break_false_negatives": [
+            {
+              "start_time": 3093.0,
+              "end_time": 3214.258,
+              "label": "Microsoft 365 Copilot; Tui; Vauxhall Electric Vans",
+              "optional": false
+            }
+          ],
+          "break_absorbed": [],
+          "break_unmatched_optional": [],
+          "audio_duration_s": null,
+          "raw_ident_count": null,
+          "unpaired_idents": null,
+          "cost_usd": 0.0,
+          "input_tokens": 128912,
+          "output_tokens": 1071,
+          "duration_seconds": 3.1582149788737297,
+          "error": null
+        }
+      ]
+    }
+  ],
+  "acast_results": []
+}
