@@ -24,7 +24,7 @@ def init_db() -> None:
         conn.commit()
     _run_migrations()
     logger.info("Database initialised")
-    _seed_preset_models()
+    _ensure_default_config()
 
 
 def _run_migrations() -> None:
@@ -137,6 +137,12 @@ def _run_migrations() -> None:
                 conn.commit()
                 logger.info(f"Added {col} column to ai_models")
 
+        if "is_preset" in ai_model_columns:
+            result = conn.exec_driver_sql("DELETE FROM ai_models WHERE is_preset = 1")
+            conn.commit()
+            if result.rowcount:
+                logger.info("Removed %d preseeded model rows", result.rowcount)
+
 
 def _backfill_cut_regions() -> None:
     """Move existing ad data onto the new `cut_regions` field.
@@ -215,53 +221,7 @@ def _backfill_stored_filenames() -> None:
             logger.info("Backfilled stored_filename for %d episodes", count)
 
 
-def _seed_preset_models() -> None:
-    from app.models import PRESET_MODELS, AIModel, AppConfig
-
-    with Session(engine) as session:
-        # Backfill capability flags on existing rows
-        existing_models = session.exec(select(AIModel)).all()
-        for m in existing_models:
-            preset = PRESET_MODELS.get(m.name)
-            if preset:
-                m.supports_transcription = preset.get("transcription", False)
-                m.supports_analysis = preset.get("analysis", False)
-                m.is_recommended = preset.get("recommended", False)
-            elif m.provider == "gemini":
-                # Legacy custom Gemini rows default to analysis-capable
-                m.supports_analysis = True
-            # Backfill base_url from host for whisper.cpp rows
-            if m.provider == "whisper.cpp" and not m.base_url and m.host:
-                m.base_url = m.host
-            session.add(m)
-        session.commit()
-
-        # Copy gemini_api_key into Gemini model rows
-        config = session.get(AppConfig, "config")
-        if config and config.gemini_api_key:
-            gemini_models = session.exec(select(AIModel).where(AIModel.provider == "gemini")).all()
-            for m in gemini_models:
-                if not m.api_key:
-                    m.api_key = config.gemini_api_key
-                    session.add(m)
-            session.commit()
-
-        # Insert new presets
-        for name, info in PRESET_MODELS.items():
-            existing = session.exec(select(AIModel).where(AIModel.name == name)).first()
-            if not existing:
-                model = AIModel(
-                    name=name,
-                    provider=info["provider"].value,
-                    is_preset=True,
-                    supports_transcription=info.get("transcription", False),
-                    supports_analysis=info.get("analysis", False),
-                    is_recommended=info.get("recommended", False),
-                )
-                session.add(model)
-                logger.info(f"Seeded preset model: {name}")
-        session.commit()
-
+def _ensure_default_config() -> None:
     from app.models import AppConfig
 
     with Session(engine) as session:

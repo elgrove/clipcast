@@ -122,52 +122,6 @@ class ClippingStatus(StrEnum):
         }[self]
 
 
-PRESET_MODELS = {
-    "gemini-2.5-flash": {
-        "provider": Provider.GEMINI,
-        "label": "Gemini 2.5 Flash",
-        "transcription": True,
-        "analysis": True,
-        "recommended": True,
-    },
-    "gemini-2.5-flash-lite": {
-        "provider": Provider.GEMINI,
-        "label": "Gemini 2.5 Flash Lite",
-        "transcription": True,
-        "analysis": False,
-        "recommended": False,
-    },
-    "gpt-4.1-mini": {
-        "provider": Provider.OPENAI_COMPATIBLE,
-        "label": "GPT-4.1 mini",
-        "transcription": False,
-        "analysis": True,
-        "recommended": True,
-    },
-    "gpt-4o-mini-transcribe": {
-        "provider": Provider.OPENAI_COMPATIBLE,
-        "label": "GPT-4o mini transcribe",
-        "transcription": True,
-        "analysis": False,
-        "recommended": True,
-    },
-    "google/gemini-2.5-flash": {
-        "provider": Provider.OPENROUTER,
-        "label": "Gemini 2.5 Flash (via OpenRouter)",
-        "transcription": False,
-        "analysis": True,
-        "recommended": True,
-    },
-    "whisper.cpp": {
-        "provider": Provider.WHISPER_CPP,
-        "label": "Whisper.cpp",
-        "transcription": True,
-        "analysis": False,
-        "recommended": True,
-    },
-}
-
-
 # ── Helper ───────────────────────────────────────────────────────────────────
 
 
@@ -197,8 +151,6 @@ class AIModel(SQLModel, table=True):
     output_price: float = Field(default=0)
 
     def __str__(self) -> str:
-        if self.is_preset:
-            return PRESET_MODELS.get(self.name, {}).get("label", self.name)
         return f"{Provider(self.provider).label} - {self.name}"
 
 

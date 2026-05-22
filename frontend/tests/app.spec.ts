@@ -129,7 +129,6 @@ test.describe('Config page', () => {
 			host: '',
 			api_key: '',
 			base_url: '',
-			is_preset: true,
 			input_price: 0,
 			output_price: 0,
 			supports_transcription: true,
@@ -144,7 +143,6 @@ test.describe('Config page', () => {
 			host: '',
 			api_key: '',
 			base_url: '',
-			is_preset: true,
 			input_price: 0,
 			output_price: 0,
 			supports_transcription: true,
@@ -159,7 +157,6 @@ test.describe('Config page', () => {
 			host: '',
 			api_key: '',
 			base_url: '',
-			is_preset: true,
 			input_price: 0,
 			output_price: 0,
 			supports_transcription: false,
@@ -203,6 +200,33 @@ test.describe('Config page', () => {
 		await expect(page.getByText('Gemini 2.5 Flash')).toBeVisible();
 		await expect(page.getByText('Whisper.cpp')).toBeVisible();
 		await page.screenshot({ path: 'tests/screenshots/06-config-page.png' });
+	});
+
+	test('shows empty-state copy when no models', async ({ page }) => {
+		await page.route('**/api/config', (route) => {
+			return route.fulfill({
+				status: 200,
+				contentType: 'application/json',
+				body: JSON.stringify({
+					transcription_model_id: null,
+					analysis_model_id: null,
+					transcription_model: null,
+					analysis_model: null,
+				}),
+			});
+		});
+		await page.route('**/api/models', (route) => {
+			if (route.request().method() === 'GET') {
+				return route.fulfill({ status: 200, body: JSON.stringify([]) });
+			}
+		});
+		await page.route('**/api/podcasts', (route) => {
+			return route.fulfill({ status: 200, body: JSON.stringify([]) });
+		});
+
+		await page.goto('/config');
+		await expect(page.getByText(/No models yet/)).toBeVisible();
+		await page.screenshot({ path: 'tests/screenshots/06c-config-empty.png' });
 	});
 
 	test('shows add model modal', async ({ page }) => {

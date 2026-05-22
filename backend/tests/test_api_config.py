@@ -6,31 +6,10 @@ def test_get_config(client):
     assert "analysis_model_id" in data
 
 
-def test_list_models(client):
+def test_list_models_empty_by_default(client):
     response = client.get("/api/models")
     assert response.status_code == 200
-    models = response.json()
-    names = {m["name"] for m in models}
-    assert "gemini-2.5-flash" in names
-    assert "whisper.cpp" in names
-    assert "gpt-4.1-mini" in names
-    assert "google/gemini-2.5-flash" in names
-
-
-def test_preset_model_capability_flags(client):
-    models = client.get("/api/models").json()
-    gemini_flash = next(m for m in models if m["name"] == "gemini-2.5-flash")
-    assert gemini_flash["supports_transcription"] is True
-    assert gemini_flash["supports_analysis"] is True
-    assert gemini_flash["is_recommended"] is True
-
-    whisper = next(m for m in models if m["name"] == "whisper.cpp")
-    assert whisper["supports_transcription"] is True
-    assert whisper["supports_analysis"] is False
-
-    openrouter = next(m for m in models if m["name"] == "google/gemini-2.5-flash")
-    assert openrouter["supports_transcription"] is False
-    assert openrouter["supports_analysis"] is True
+    assert response.json() == []
 
 
 def test_add_custom_model(client):
@@ -47,8 +26,9 @@ def test_add_custom_model(client):
     assert response.status_code == 201
     data = response.json()
     assert data["name"] == "my-custom-model"
-    assert data["is_preset"] is False
     assert data["api_key"] == "test-key"
+    assert data["supports_transcription"] is True
+    assert data["supports_analysis"] is True
 
 
 def test_add_custom_openrouter_model(client):
@@ -71,11 +51,19 @@ def test_add_custom_openrouter_model(client):
 
 
 def test_update_model(client):
-    models = client.get("/api/models").json()
-    gemini = next(m for m in models if m["name"] == "gemini-2.5-flash")
+    created = client.post(
+        "/api/models",
+        json={
+            "name": "gemini-2.5-flash",
+            "provider": "gemini",
+            "api_key": "",
+            "supports_transcription": True,
+            "supports_analysis": True,
+        },
+    ).json()
 
     response = client.put(
-        f"/api/models/{gemini['id']}",
+        f"/api/models/{created['id']}",
         json={"api_key": "my-gemini-key"},
     )
     assert response.status_code == 200
@@ -83,7 +71,6 @@ def test_update_model(client):
 
 
 def test_delete_model(client):
-    # Create then delete
     resp = client.post(
         "/api/models",
         json={"name": "to-delete", "provider": "gemini"},
@@ -93,42 +80,72 @@ def test_delete_model(client):
     response = client.delete(f"/api/models/{model_id}")
     assert response.status_code == 204
 
-    # No longer in list
     models = client.get("/api/models").json()
     assert not any(m["id"] == model_id for m in models)
 
 
 def test_capability_validation_transcription(client):
-    """Cannot set a non-transcription model as transcription model."""
-    models = client.get("/api/models").json()
-    # gpt-4.1-mini supports analysis only
-    gpt = next(m for m in models if m["name"] == "gpt-4.1-mini")
+    """Cannot set an analysis-only model as transcription model."""
+    analysis_only = client.post(
+        "/api/models",
+        json={
+            "name": "gpt-4.1-mini",
+            "provider": "openai-compatible",
+            "base_url": "https://api.openai.com/v1",
+            "supports_transcription": False,
+            "supports_analysis": True,
+        },
+    ).json()
 
     response = client.put(
         "/api/config",
-        json={"transcription_model_id": gpt["id"]},
+        json={"transcription_model_id": analysis_only["id"]},
     )
     assert response.status_code == 422
     assert "transcription" in response.json()["detail"].lower()
 
 
 def test_capability_validation_analysis(client):
-    """Cannot set a non-analysis model as analysis model."""
-    models = client.get("/api/models").json()
-    whisper = next(m for m in models if m["name"] == "whisper.cpp")
+    """Cannot set a transcription-only model as analysis model."""
+    transcription_only = client.post(
+        "/api/models",
+        json={
+            "name": "whisper.cpp",
+            "provider": "whisper.cpp",
+            "base_url": "http://localhost:8080",
+            "supports_transcription": True,
+            "supports_analysis": False,
+        },
+    ).json()
 
     response = client.put(
         "/api/config",
-        json={"analysis_model_id": whisper["id"]},
+        json={"analysis_model_id": transcription_only["id"]},
     )
     assert response.status_code == 422
     assert "analysis" in response.json()["detail"].lower()
 
 
 def test_update_config_with_valid_models(client):
-    models = client.get("/api/models").json()
-    gemini = next(m for m in models if m["name"] == "gemini-2.5-flash")
-    whisper = next(m for m in models if m["name"] == "whisper.cpp")
+    gemini = client.post(
+        "/api/models",
+        json={
+            "name": "gemini-2.5-flash",
+            "provider": "gemini",
+            "supports_transcription": True,
+            "supports_analysis": True,
+        },
+    ).json()
+    whisper = client.post(
+        "/api/models",
+        json={
+            "name": "whisper.cpp",
+            "provider": "whisper.cpp",
+            "base_url": "http://localhost:8080",
+            "supports_transcription": True,
+            "supports_analysis": False,
+        },
+    ).json()
 
     response = client.put(
         "/api/config",

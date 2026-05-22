@@ -225,7 +225,7 @@
 			</div>
 			<div class="mt-4 space-y-3">
 				{#if models.length === 0}
-					<p class="text-sm text-zinc-500 dark:text-zinc-400">No models yet. Click Add to get started.</p>
+					<p class="text-sm text-zinc-500 dark:text-zinc-400">No models yet — click Add to configure your first one. You'll need at least a transcription model and an analysis model for clipping to work.</p>
 				{:else}
 					{#each models as model (model.id)}
 						<ModelCard
