@@ -113,6 +113,13 @@ def _run_migrations() -> None:
             conn.commit()
             logger.info("Added identify_ads_in_acast_breaks column to config")
 
+        if "openrouter_api_key" not in config_columns:
+            conn.exec_driver_sql(
+                "ALTER TABLE config ADD COLUMN openrouter_api_key VARCHAR DEFAULT ''"
+            )
+            conn.commit()
+            logger.info("Added openrouter_api_key column to config")
+
 
 def _backfill_cut_regions() -> None:
     """Move existing ad data onto the new `cut_regions` field.

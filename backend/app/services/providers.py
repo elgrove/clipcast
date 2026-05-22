@@ -4,10 +4,12 @@ import re
 from abc import ABC, abstractmethod
 from decimal import Decimal
 from pathlib import Path
+from typing import ClassVar
 
 import requests
 from google import genai
 from google.genai import types
+from openai import OpenAI
 from pydantic import BaseModel as PydanticBaseModel
 
 from app.models import (
@@ -202,6 +204,105 @@ class WhisperProvider(AIProviderBase):
         raise NotImplementedError("WhisperProvider only supports transcription, not analysis")
 
 
+class OpenAICompatibleProvider(AIProviderBase):
+    """Shared base for any provider exposing an OpenAI-compatible Chat Completions API
+    (OpenAI itself, OpenRouter, vLLM, LM Studio, Together, Groq, DeepSeek, ...).
+
+    Subclasses override class-level config (`base_url`, `default_headers`) and the
+    hook methods at the bottom for vendor-specific behaviour."""
+
+    base_url: ClassVar[str] = ""
+    default_headers: ClassVar[dict[str, str]] = {}
+
+    def __init__(self, api_key: str, model_config: AIModel):
+        self.api_key = api_key
+        self.model_config = model_config
+
+    def transcribe(self, audio_path: Path, report: TranscriptionReport = None) -> Transcription:
+        raise NotImplementedError(f"{type(self).__name__} does not support transcription")
+
+    def analyse_adverts(
+        self,
+        transcription: Transcription,
+        report: AnalysisReport = None,
+        custom_instructions: str | None = None,
+    ) -> PodcastEpisodeAdverts:
+        logger.info(
+            "Analysing adverts with %s model %s",
+            type(self).__name__,
+            self.model_config.name,
+        )
+
+        transcript_json = json.dumps(transcription.model_dump(), indent=2)
+        prompt = ANALYSE_ADVERTS_PROMPT.format(transcript=transcript_json)
+        if custom_instructions:
+            prompt += f"\n\nAdditional instructions:\n{custom_instructions}"
+
+        client = OpenAI(api_key=self.api_key, base_url=self._resolve_base_url())
+        completion = client.beta.chat.completions.parse(
+            model=self.model_config.name,
+            messages=[{"role": "user", "content": prompt}],
+            response_format=PodcastEpisodeAdverts,
+            extra_headers=self.default_headers or None,
+            timeout=ANALYSIS_TIMEOUT,
+            **self._extra_request_kwargs(),
+        )
+
+        usage = getattr(completion, "usage", None)
+        if report is not None and usage is not None:
+            input_tokens = getattr(usage, "prompt_tokens", 0) or 0
+            output_tokens = getattr(usage, "completion_tokens", 0) or 0
+            report.input_tokens = input_tokens
+            report.output_tokens = output_tokens
+            reported_cost = self._extract_cost(completion)
+            report.cost_usd = (
+                reported_cost
+                if reported_cost is not None
+                else self.calculate_cost(input_tokens, output_tokens, self.model_config)
+            )
+
+        parsed = completion.choices[0].message.parsed
+        if parsed is None:
+            # Model refused or returned no structured output; fall back to raw content.
+            content = completion.choices[0].message.content or ""
+            return PodcastEpisodeAdverts.model_validate_json(content)
+        return parsed
+
+    # ── override points ─────────────────────────────────────────────────────────
+
+    def _resolve_base_url(self) -> str:
+        """Default: class-level. Override for instance-derived URLs (e.g. a
+        generic self-hosted endpoint read from ``model_config.host``)."""
+        return self.base_url
+
+    def _extra_request_kwargs(self) -> dict:
+        """Override to inject extra request kwargs — e.g. OpenRouter's
+        ``extra_body={"usage": {"include": True}}`` to get cost in the response."""
+        return {}
+
+    def _extract_cost(self, completion) -> float | None:
+        """Override if the vendor returns cost in the response (e.g. OpenRouter's
+        ``usage.cost``). Return ``None`` to fall back to ``calculate_cost()``."""
+        return None
+
+
+class OpenRouterProvider(OpenAICompatibleProvider):
+    base_url = "https://openrouter.ai/api/v1"
+    default_headers = {
+        "HTTP-Referer": "https://github.com/elgrove/clipcast",
+        "X-Title": "Clipcast",
+    }
+
+    def _extra_request_kwargs(self) -> dict:
+        return {"extra_body": {"usage": {"include": True}}}
+
+    def _extract_cost(self, completion) -> float | None:
+        usage = getattr(completion, "usage", None)
+        if usage is None:
+            return None
+        return getattr(usage, "cost", None)
+
+
 def get_ai_provider(task_type: str, config: AppConfig) -> AIProviderBase:
     if task_type not in ("transcription", "analysis"):
         raise ValueError(f"Invalid task_type: {task_type}. Must be 'transcription' or 'analysis'")
@@ -219,6 +320,8 @@ def get_ai_provider(task_type: str, config: AppConfig) -> AIProviderBase:
 
     if task_type == "analysis" and provider_type == Provider.WHISPER:
         raise ValueError("Whisper does not support analysis, only transcription")
+    if task_type == "transcription" and provider_type == Provider.OPENROUTER:
+        raise ValueError("OpenRouter does not support transcription, only analysis")
 
     if provider_type == Provider.GEMINI:
         if not config.gemini_api_key:
@@ -227,5 +330,10 @@ def get_ai_provider(task_type: str, config: AppConfig) -> AIProviderBase:
 
     if provider_type == Provider.WHISPER:
         return WhisperProvider(model_config=model_config)
+
+    if provider_type == Provider.OPENROUTER:
+        if not config.openrouter_api_key:
+            raise ValueError("No OpenRouter API key configured")
+        return OpenRouterProvider(api_key=config.openrouter_api_key, model_config=model_config)
 
     raise ValueError(f"Unsupported provider: {provider_type}")

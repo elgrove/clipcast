@@ -41,6 +41,7 @@ def get_config(session: Session = Depends(get_session)):
         transcription_model_id=config.transcription_model_id,
         analysis_model_id=config.analysis_model_id,
         gemini_api_key=config.gemini_api_key,
+        openrouter_api_key=config.openrouter_api_key,
         identify_ads_in_acast_breaks=config.identify_ads_in_acast_breaks,
         transcription_model=(
             _ai_model_to_read(config.transcription_model) if config.transcription_model else None
@@ -60,6 +61,8 @@ def update_config(data: ConfigUpdate, session: Session = Depends(get_session)):
         config.analysis_model_id = data.analysis_model_id
     if data.gemini_api_key is not None:
         config.gemini_api_key = data.gemini_api_key
+    if data.openrouter_api_key is not None:
+        config.openrouter_api_key = data.openrouter_api_key
     if data.identify_ads_in_acast_breaks is not None:
         config.identify_ads_in_acast_breaks = data.identify_ads_in_acast_breaks
     session.add(config)
@@ -105,7 +108,11 @@ def export_opml(
     opml.write(b"  <body>\n")
 
     for podcast in podcasts:
-        url = f"{base_url}/feed/{podcast.itunes_id}" if feed_type == "clipcast" else podcast.source_rss_url
+        url = (
+            f"{base_url}/feed/{podcast.itunes_id}"
+            if feed_type == "clipcast"
+            else podcast.source_rss_url
+        )
         title = podcast.title.replace("&", "&amp;").replace('"', "&quot;")
         opml.write(f'    <outline text="{title}" xmlUrl="{url}" type="rss" />\n'.encode())
 
