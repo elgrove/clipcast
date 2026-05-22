@@ -4,8 +4,15 @@ import os
 from collections.abc import Callable
 from dataclasses import dataclass
 
-from app.models import PRESET_MODELS, AIModel, Provider
+from app.models import AIModel, Provider
 from app.services.providers import AIProviderBase, GeminiProvider
+
+# Bare-name → provider shortcut for the evals harness. Add entries here when a
+# new model gets common enough that typing the provider prefix is tedious.
+KNOWN_BARE_MODELS: dict[str, Provider] = {
+    "gemini-2.5-flash": Provider.GEMINI,
+    "gemini-2.5-flash-lite": Provider.GEMINI,
+}
 
 
 @dataclass(frozen=True)
@@ -34,7 +41,6 @@ def _gemini_factory(model_name: str, api_key: str) -> AIProviderBase:
         provider=Provider.GEMINI.value,
         input_price=input_price,
         output_price=output_price,
-        is_preset=False,
     )
     return GeminiProvider(api_key=api_key, model_config=model_config)
 
@@ -67,7 +73,7 @@ def parse_model_spec(spec: str) -> ModelSpec:
 
     Accepts either:
       - ``provider:model_name`` (explicit) — e.g. ``gemini:gemini-2.5-flash``
-      - ``model_name`` alone — provider is inferred from PRESET_MODELS
+      - ``model_name`` alone — provider inferred from KNOWN_BARE_MODELS
 
     Raises ProviderError if the provider can't be determined or isn't registered.
     """
@@ -82,12 +88,12 @@ def parse_model_spec(spec: str) -> ModelSpec:
         if not provider or not model:
             raise ProviderError(f"Invalid model spec: {spec!r}")
     else:
-        preset = PRESET_MODELS.get(spec)
-        if not preset:
+        known = KNOWN_BARE_MODELS.get(spec)
+        if not known:
             raise ProviderError(
                 f"Cannot infer provider from {spec!r}. Use 'provider:model' (e.g. 'gemini:{spec}')."
             )
-        provider = preset["provider"].value
+        provider = known.value
         model = spec
 
     if provider not in REGISTRY:

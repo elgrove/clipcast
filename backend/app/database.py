@@ -24,7 +24,7 @@ def init_db() -> None:
         conn.commit()
     _run_migrations()
     logger.info("Database initialised")
-    _seed_preset_models()
+    _ensure_default_config()
 
 
 def _run_migrations() -> None:
@@ -120,6 +120,29 @@ def _run_migrations() -> None:
             conn.commit()
             logger.info("Added openrouter_api_key column to config")
 
+        ai_model_columns = [
+            row[1] for row in conn.exec_driver_sql("PRAGMA table_info(ai_models)").fetchall()
+        ]
+        for col, defval, coltype in [
+            ("api_key", "''", "VARCHAR"),
+            ("base_url", "''", "VARCHAR(500)"),
+            ("supports_transcription", "0", "BOOLEAN"),
+            ("supports_analysis", "0", "BOOLEAN"),
+            ("is_recommended", "0", "BOOLEAN"),
+        ]:
+            if col not in ai_model_columns:
+                conn.exec_driver_sql(
+                    f"ALTER TABLE ai_models ADD COLUMN {col} {coltype} DEFAULT {defval}"
+                )
+                conn.commit()
+                logger.info(f"Added {col} column to ai_models")
+
+        if "is_preset" in ai_model_columns:
+            result = conn.exec_driver_sql("DELETE FROM ai_models WHERE is_preset = 1")
+            conn.commit()
+            if result.rowcount:
+                logger.info("Removed %d preseeded model rows", result.rowcount)
+
 
 def _backfill_cut_regions() -> None:
     """Move existing ad data onto the new `cut_regions` field.
@@ -198,23 +221,7 @@ def _backfill_stored_filenames() -> None:
             logger.info("Backfilled stored_filename for %d episodes", count)
 
 
-def _seed_preset_models() -> None:
-    from app.models import PRESET_MODELS, AIModel
-
-    with Session(engine) as session:
-        for name, info in PRESET_MODELS.items():
-            existing = session.exec(select(AIModel).where(AIModel.name == name)).first()
-            if not existing:
-                model = AIModel(
-                    name=name,
-                    provider=info["provider"].value,
-                    is_preset=True,
-                )
-                session.add(model)
-                logger.info(f"Seeded preset model: {name}")
-        session.commit()
-
-    # Ensure config singleton exists
+def _ensure_default_config() -> None:
     from app.models import AppConfig
 
     with Session(engine) as session:

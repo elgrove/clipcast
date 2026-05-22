@@ -167,10 +167,10 @@ class WhisperProvider(AIProviderBase):
             raise ConnectionError(f"Whisper server unreachable at {base_url}: {e}") from e
 
     def transcribe(self, audio_path: Path, report: TranscriptionReport = None) -> Transcription:
-        if not self.model_config.host:
-            raise ValueError("No Whisper host configured for this model")
+        base_url = (self.model_config.base_url or self.model_config.host or "").rstrip("/")
+        if not base_url:
+            raise ValueError("No Whisper URL configured for this model")
 
-        base_url = self.model_config.host.rstrip("/")
         self._check_health(base_url)
         logger.info("Transcribing with Whisper at %s (file: %s)", base_url, audio_path.name)
 
@@ -209,17 +209,44 @@ class OpenAICompatibleProvider(AIProviderBase):
     (OpenAI itself, OpenRouter, vLLM, LM Studio, Together, Groq, DeepSeek, ...).
 
     Subclasses override class-level config (`base_url`, `default_headers`) and the
-    hook methods at the bottom for vendor-specific behaviour."""
+    hook methods at the bottom for vendor-specific behaviour. The api_key and any
+    custom base_url come from ``model_config`` (per-model storage)."""
 
     base_url: ClassVar[str] = ""
     default_headers: ClassVar[dict[str, str]] = {}
 
-    def __init__(self, api_key: str, model_config: AIModel):
-        self.api_key = api_key
+    def __init__(self, model_config: AIModel):
         self.model_config = model_config
+        if not model_config.api_key:
+            raise ValueError(f"No API key configured for model {model_config.name}")
+
+    def _client(self) -> OpenAI:
+        return OpenAI(api_key=self.model_config.api_key, base_url=self._resolve_base_url())
 
     def transcribe(self, audio_path: Path, report: TranscriptionReport = None) -> Transcription:
-        raise NotImplementedError(f"{type(self).__name__} does not support transcription")
+        logger.info(
+            "Transcribing with %s model %s",
+            type(self).__name__,
+            self.model_config.name,
+        )
+        with open(audio_path, "rb") as audio_file:
+            response = self._client().audio.transcriptions.create(
+                model=self.model_config.name,
+                file=(audio_path.name, audio_file, "audio/mpeg"),
+                response_format="verbose_json",
+                extra_headers=self.default_headers or None,
+                timeout=TRANSCRIPTION_TIMEOUT,
+            )
+        segments = [
+            TranscriptionSegment(
+                start_time=seg.start,
+                end_time=seg.end,
+                text=seg.text.strip(),
+            )
+            for seg in (response.segments or [])
+            if seg.text.strip()
+        ]
+        return Transcription(segments=segments)
 
     def analyse_adverts(
         self,
@@ -238,8 +265,7 @@ class OpenAICompatibleProvider(AIProviderBase):
         if custom_instructions:
             prompt += f"\n\nAdditional instructions:\n{custom_instructions}"
 
-        client = OpenAI(api_key=self.api_key, base_url=self._resolve_base_url())
-        completion = client.beta.chat.completions.parse(
+        completion = self._client().beta.chat.completions.parse(
             model=self.model_config.name,
             messages=[{"role": "user", "content": prompt}],
             response_format=PodcastEpisodeAdverts,
@@ -263,7 +289,6 @@ class OpenAICompatibleProvider(AIProviderBase):
 
         parsed = completion.choices[0].message.parsed
         if parsed is None:
-            # Model refused or returned no structured output; fall back to raw content.
             content = completion.choices[0].message.content or ""
             return PodcastEpisodeAdverts.model_validate_json(content)
         return parsed
@@ -271,9 +296,9 @@ class OpenAICompatibleProvider(AIProviderBase):
     # ── override points ─────────────────────────────────────────────────────────
 
     def _resolve_base_url(self) -> str:
-        """Default: class-level. Override for instance-derived URLs (e.g. a
-        generic self-hosted endpoint read from ``model_config.host``)."""
-        return self.base_url
+        """Default: class-level, falling back to ``model_config.base_url`` for
+        generic OpenAI-compatible endpoints where the user provides a URL."""
+        return self.base_url or self.model_config.base_url
 
     def _extra_request_kwargs(self) -> dict:
         """Override to inject extra request kwargs — e.g. OpenRouter's
@@ -318,22 +343,22 @@ def get_ai_provider(task_type: str, config: AppConfig) -> AIProviderBase:
 
     provider_type = Provider(model_config.provider)
 
-    if task_type == "analysis" and provider_type == Provider.WHISPER:
-        raise ValueError("Whisper does not support analysis, only transcription")
-    if task_type == "transcription" and provider_type == Provider.OPENROUTER:
-        raise ValueError("OpenRouter does not support transcription, only analysis")
+    if task_type == "analysis" and provider_type == Provider.WHISPER_CPP:
+        raise ValueError("Whisper.cpp does not support analysis, only transcription")
 
     if provider_type == Provider.GEMINI:
-        if not config.gemini_api_key:
+        api_key = model_config.api_key or config.gemini_api_key
+        if not api_key:
             raise ValueError("No Gemini API key configured")
-        return GeminiProvider(api_key=config.gemini_api_key, model_config=model_config)
+        return GeminiProvider(api_key=api_key, model_config=model_config)
 
-    if provider_type == Provider.WHISPER:
-        return WhisperProvider(model_config=model_config)
+    if provider_type == Provider.OPENAI_COMPATIBLE:
+        return OpenAICompatibleProvider(model_config=model_config)
 
     if provider_type == Provider.OPENROUTER:
-        if not config.openrouter_api_key:
-            raise ValueError("No OpenRouter API key configured")
-        return OpenRouterProvider(api_key=config.openrouter_api_key, model_config=model_config)
+        return OpenRouterProvider(model_config=model_config)
+
+    if provider_type == Provider.WHISPER_CPP:
+        return WhisperProvider(model_config=model_config)
 
     raise ValueError(f"Unsupported provider: {provider_type}")

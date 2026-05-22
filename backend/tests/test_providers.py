@@ -23,10 +23,11 @@ from app.services.providers import (
 # ── Helpers ──────────────────────────────────────────────────────────────────
 
 
-def _openrouter_model() -> AIModel:
+def _openrouter_model(api_key: str = "sk-or-v1-test") -> AIModel:
     return AIModel(
         name="anthropic/claude-sonnet-4",
         provider="openrouter",
+        api_key=api_key,
         input_price=0.0,
         output_price=0.0,
     )
@@ -84,37 +85,20 @@ def _patch_openai(monkeypatch, completion):
 # ── Selector validation ──────────────────────────────────────────────────────
 
 
-def test_get_ai_provider_rejects_openrouter_for_transcription(session):
-    model = _openrouter_model()
-    session.add(model)
-    session.commit()
-    session.refresh(model)
-
-    config = session.get(AppConfig, "config")
-    config.transcription_model_id = model.id
-    config.openrouter_api_key = "sk-or-v1-test"
-    session.add(config)
-    session.commit()
-    session.refresh(config)
-
-    with pytest.raises(ValueError, match="OpenRouter does not support transcription"):
-        get_ai_provider("transcription", config)
-
-
 def test_get_ai_provider_openrouter_requires_api_key(session):
-    model = _openrouter_model()
+    """Per-model api_key is required for OpenRouter."""
+    model = _openrouter_model(api_key="")
     session.add(model)
     session.commit()
     session.refresh(model)
 
     config = session.get(AppConfig, "config")
     config.analysis_model_id = model.id
-    config.openrouter_api_key = ""
     session.add(config)
     session.commit()
     session.refresh(config)
 
-    with pytest.raises(ValueError, match="No OpenRouter API key configured"):
+    with pytest.raises(ValueError, match="No API key configured"):
         get_ai_provider("analysis", config)
 
 
@@ -126,14 +110,13 @@ def test_get_ai_provider_returns_openrouter_provider(session):
 
     config = session.get(AppConfig, "config")
     config.analysis_model_id = model.id
-    config.openrouter_api_key = "sk-or-v1-test"
     session.add(config)
     session.commit()
     session.refresh(config)
 
     provider = get_ai_provider("analysis", config)
     assert isinstance(provider, OpenRouterProvider)
-    assert provider.api_key == "sk-or-v1-test"
+    assert provider.model_config.api_key == "sk-or-v1-test"
     assert provider.model_config.name == "anthropic/claude-sonnet-4"
 
 
@@ -143,7 +126,7 @@ def test_get_ai_provider_returns_openrouter_provider(session):
 def test_openrouter_provider_analyse_adverts_happy_path(monkeypatch):
     _patch_openai(monkeypatch, _fake_completion(cost=0.0042))
 
-    provider = OpenRouterProvider(api_key="sk-or-v1-test", model_config=_openrouter_model())
+    provider = OpenRouterProvider(model_config=_openrouter_model())
     transcription = Transcription(segments=[])
     report = AnalysisReport()
 
@@ -175,7 +158,7 @@ def test_openrouter_provider_cost_falls_back_when_response_omits_cost(monkeypatc
     model = _openrouter_model()
     model.input_price = 300  # arbitrary, just to prove calculate_cost ran
     model.output_price = 1500
-    provider = OpenRouterProvider(api_key="sk-or-v1-test", model_config=model)
+    provider = OpenRouterProvider(model_config=model)
     report = AnalysisReport()
 
     provider.analyse_adverts(Transcription(segments=[]), report=report)
@@ -189,7 +172,7 @@ def test_openrouter_provider_cost_falls_back_when_response_omits_cost(monkeypatc
 def test_openrouter_provider_appends_custom_instructions(monkeypatch):
     _patch_openai(monkeypatch, _fake_completion())
 
-    provider = OpenRouterProvider(api_key="sk-or-v1-test", model_config=_openrouter_model())
+    provider = OpenRouterProvider(model_config=_openrouter_model())
     provider.analyse_adverts(
         Transcription(segments=[]),
         report=AnalysisReport(),
@@ -199,12 +182,6 @@ def test_openrouter_provider_appends_custom_instructions(monkeypatch):
     prompt = _FakeOpenAI.last_call_kwargs["messages"][0]["content"]
     assert "Additional instructions:" in prompt
     assert "Ignore mentions of Patreon." in prompt
-
-
-def test_openrouter_provider_transcribe_not_supported():
-    provider = OpenRouterProvider(api_key="sk-or-v1-test", model_config=_openrouter_model())
-    with pytest.raises(NotImplementedError, match="does not support transcription"):
-        provider.transcribe(audio_path=None)
 
 
 # ── Shared base class reuse ──────────────────────────────────────────────────
@@ -221,8 +198,14 @@ def test_openai_compatible_base_is_reusable_without_openrouter_overrides(monkeyp
     class _MyProvider(OpenAICompatibleProvider):
         base_url = "https://api.example.test/v1"
 
-    model = AIModel(name="example/foo", provider="openrouter", input_price=0, output_price=0)
-    provider = _MyProvider(api_key="example-key", model_config=model)
+    model = AIModel(
+        name="example/foo",
+        provider="openrouter",
+        api_key="example-key",
+        input_price=0,
+        output_price=0,
+    )
+    provider = _MyProvider(model_config=model)
     report = AnalysisReport()
 
     result = provider.analyse_adverts(Transcription(segments=[]), report=report)

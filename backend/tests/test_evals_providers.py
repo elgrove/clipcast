@@ -16,8 +16,8 @@ def test_parse_model_spec_explicit():
     assert spec == ModelSpec(provider="gemini", model="gemini-2.5-flash")
 
 
-def test_parse_model_spec_preset_lookup():
-    # PRESET_MODELS contains gemini-2.5-flash with provider Gemini
+def test_parse_model_spec_bare_known_model():
+    # KNOWN_BARE_MODELS contains gemini-2.5-flash with provider Gemini
     spec = parse_model_spec("gemini-2.5-flash")
     assert spec == ModelSpec(provider="gemini", model="gemini-2.5-flash")
 

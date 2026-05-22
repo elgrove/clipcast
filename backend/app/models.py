@@ -87,15 +87,17 @@ class ClipMode(StrEnum):
 
 class Provider(StrEnum):
     GEMINI = "gemini"
-    WHISPER = "whisper.cpp"
+    OPENAI_COMPATIBLE = "openai-compatible"
     OPENROUTER = "openrouter"
+    WHISPER_CPP = "whisper.cpp"  # symbol renamed from WHISPER; string value unchanged
 
     @property
     def label(self) -> str:
         labels = {
             Provider.GEMINI: "Gemini",
-            Provider.WHISPER: "Whisper.cpp",
+            Provider.OPENAI_COMPATIBLE: "OpenAI-compatible",
             Provider.OPENROUTER: "OpenRouter",
+            Provider.WHISPER_CPP: "Whisper.cpp",
         }
         return labels[self]
 
@@ -120,13 +122,6 @@ class ClippingStatus(StrEnum):
         }[self]
 
 
-PRESET_MODELS = {
-    "gemini-2.5-flash": {"provider": Provider.GEMINI, "label": "Gemini 2.5 Flash"},
-    "gemini-2.5-flash-lite": {"provider": Provider.GEMINI, "label": "Gemini 2.5 Flash Lite"},
-    "whisper.cpp": {"provider": Provider.WHISPER, "label": "Whisper.cpp"},
-}
-
-
 # ── Helper ───────────────────────────────────────────────────────────────────
 
 
@@ -147,12 +142,15 @@ class AIModel(SQLModel, table=True):
     provider: str = Field(max_length=20)
     host: str = Field(default="")
     is_preset: bool = Field(default=False)
+    api_key: str = Field(default="")
+    base_url: str = Field(default="")
+    supports_transcription: bool = Field(default=False)
+    supports_analysis: bool = Field(default=False)
+    is_recommended: bool = Field(default=False)
     input_price: float = Field(default=0)
     output_price: float = Field(default=0)
 
     def __str__(self) -> str:
-        if self.is_preset:
-            return PRESET_MODELS.get(self.name, {}).get("label", self.name)
         return f"{Provider(self.provider).label} - {self.name}"
 
 
@@ -461,8 +459,8 @@ class PodcastShowUpdate(PydanticBaseModel):
 class ConfigRead(PydanticBaseModel):
     transcription_model_id: str | None
     analysis_model_id: str | None
-    gemini_api_key: str
-    openrouter_api_key: str
+    gemini_api_key: str = ""
+    openrouter_api_key: str = ""
     identify_ads_in_acast_breaks: bool = False
     transcription_model: "AIModelRead | None" = None
     analysis_model: "AIModelRead | None" = None
@@ -471,6 +469,8 @@ class ConfigRead(PydanticBaseModel):
 class ConfigUpdate(PydanticBaseModel):
     transcription_model_id: str | None = None
     analysis_model_id: str | None = None
+    # gemini_api_key and openrouter_api_key accepted but ignored (deprecated;
+    # api keys are now stored per-model)
     gemini_api_key: str | None = None
     openrouter_api_key: str | None = None
     identify_ads_in_acast_breaks: bool | None = None
@@ -481,9 +481,14 @@ class AIModelRead(PydanticBaseModel):
     name: str
     provider: str
     host: str
+    api_key: str = ""
+    base_url: str = ""
     is_preset: bool
     input_price: float
     output_price: float
+    supports_transcription: bool = False
+    supports_analysis: bool = False
+    is_recommended: bool = False
     display_name: str = ""
 
 
@@ -491,6 +496,26 @@ class AIModelCreate(PydanticBaseModel):
     name: str
     provider: str
     host: str = ""
+    api_key: str = ""
+    base_url: str = ""
+    supports_transcription: bool = False
+    supports_analysis: bool = False
+
+
+class AIModelUpdate(PydanticBaseModel):
+    name: str | None = None
+    api_key: str | None = None
+    base_url: str | None = None
+    supports_transcription: bool | None = None
+    supports_analysis: bool | None = None
+    input_price: float | None = None
+    output_price: float | None = None
+
+
+class ModelTestResult(PydanticBaseModel):
+    ok: bool
+    message: str
+    latency_ms: int
 
 
 class ClippingReportRead(PydanticBaseModel):
