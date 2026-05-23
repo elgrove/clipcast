@@ -25,8 +25,10 @@
 	let transcriptionModelId = $state('');
 	let analysisModelId = $state('');
 	let identifyAdsInAcastBreaks = $state(false);
+	let keepRawEpisodes = $state(true);
 	let savingConfig = $state(false);
 	let savingAcastSetting = $state(false);
+	let savingStorageSetting = $state(false);
 
 	let modelModalOpen = $state(false);
 	let editingModel: AIModel | null = $state(null);
@@ -57,6 +59,7 @@
 			transcriptionModelId = cfg.transcription_model_id || '';
 			analysisModelId = cfg.analysis_model_id || '';
 			identifyAdsInAcastBreaks = cfg.identify_ads_in_acast_breaks;
+			keepRawEpisodes = cfg.keep_raw_episodes;
 		} catch (e: any) {
 			toasts.addToast('error', e.message || 'Failed to load config');
 		} finally {
@@ -93,6 +96,21 @@
 			toasts.addToast('error', e.message || 'Failed to save');
 		} finally {
 			savingAcastSetting = false;
+		}
+	}
+
+	async function handleSaveStorageSetting() {
+		savingStorageSetting = true;
+		try {
+			config = await updateConfig({
+				keep_raw_episodes: keepRawEpisodes,
+			});
+			keepRawEpisodes = config.keep_raw_episodes;
+			toasts.addToast('success', 'Storage setting saved');
+		} catch (e: any) {
+			toasts.addToast('error', e.message || 'Failed to save');
+		} finally {
+			savingStorageSetting = false;
 		}
 	}
 
@@ -316,6 +334,31 @@
 					</span>
 					<span class="mt-0.5 block text-xs text-zinc-500 dark:text-zinc-400">
 						For each Acast ad break detected, transcribe the audio and ask the analysis model to identify the sponsors. Adverts appear in reports with the sponsor name and timing. Requires both transcription and analysis models to be configured above.
+					</span>
+				</label>
+			</div>
+		</div>
+
+		<!-- Storage -->
+		<div class="rounded-xl border border-zinc-200 bg-white p-6 dark:border-zinc-800 dark:bg-zinc-900">
+			<h2 class="text-lg font-semibold text-zinc-900 dark:text-white">Storage</h2>
+			<div class="mt-4 flex items-start gap-3">
+				<input
+					id="keep-raw-episodes"
+					type="checkbox"
+					bind:checked={keepRawEpisodes}
+					onchange={handleSaveStorageSetting}
+					disabled={savingStorageSetting}
+					class="mt-0.5 h-4 w-4 rounded border-zinc-300 text-emerald-600 focus:ring-emerald-500 disabled:opacity-50 dark:border-zinc-700 dark:bg-zinc-900"
+				/>
+				<label for="keep-raw-episodes" class="flex-1 cursor-pointer">
+					<span class="block text-sm font-medium text-zinc-700 dark:text-zinc-300">
+						Keep raw (un-clipped) episode audio
+					</span>
+					<span class="mt-0.5 block text-xs text-zinc-500 dark:text-zinc-400">
+						Preserve the original MP3 alongside the clipped version. Roughly doubles disk
+						usage but lets you re-edit episodes if ad detection changes. Disabling skips the
+						Acast host-read verification pass, which needs the raw audio.
 					</span>
 				</label>
 			</div>

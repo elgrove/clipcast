@@ -280,8 +280,10 @@ def task_edit(self, episode_id: str, report_id: str) -> None:
         episode = session.get(PodcastEpisode, episode_id)
         if not episode:
             raise ValueError(f"Episode not found: {episode_id}")
+        config = session.get(AppConfig, "config")
+        keep_raw = config.keep_raw_episodes if config else True
         try:
-            edit_episode(episode)
+            edit_episode(episode, keep_raw=keep_raw)
         except Exception as e:
             _fail_report(report_id, e, f"Editing failed: {e}")
             raise

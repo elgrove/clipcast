@@ -45,6 +45,7 @@ def get_config(session: Session = Depends(get_session)):
         transcription_model_id=config.transcription_model_id,
         analysis_model_id=config.analysis_model_id,
         identify_ads_in_acast_breaks=config.identify_ads_in_acast_breaks,
+        keep_raw_episodes=config.keep_raw_episodes,
         transcription_model=(
             _ai_model_to_read(config.transcription_model) if config.transcription_model else None
         ),
@@ -81,6 +82,8 @@ def update_config(data: ConfigUpdate, session: Session = Depends(get_session)):
         config.analysis_model_id = data.analysis_model_id or None
     if data.identify_ads_in_acast_breaks is not None:
         config.identify_ads_in_acast_breaks = data.identify_ads_in_acast_breaks
+    if data.keep_raw_episodes is not None:
+        config.keep_raw_episodes = data.keep_raw_episodes
     session.add(config)
     session.commit()
     session.refresh(config)

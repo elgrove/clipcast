@@ -122,6 +122,79 @@ def test_apply_cuts_inplace_overlapping_cuts(tmp_path):
     assert len(out) == pytest.approx(5_000, abs=200)
 
 
+# ── edit_episode (keep_raw flag) ──────────────────────────────────────────────
+
+
+def _load_mp3(path: Path) -> AudioSegment:
+    """Read an mp3 via file handle. Episode raw_path uses a `.mp3.raw` suffix
+    which pydub would otherwise interpret as raw PCM."""
+    with open(path, "rb") as fh:
+        return AudioSegment.from_file(fh, format="mp3")
+
+
+def _make_episode_with_cuts(
+    session, path_directory: str, cuts_s: list[tuple[float, float]]
+):
+    from app.models import ClipMode, PodcastEpisode, PodcastShow
+
+    podcast = PodcastShow(
+        title=f"Edit Show {path_directory}",
+        itunes_id=f"edit-show-{path_directory}",
+        source_rss_url="https://example.com/feed",
+        path_directory=path_directory,
+        clip_mode=ClipMode.AI,
+    )
+    session.add(podcast)
+    session.commit()
+    session.refresh(podcast)
+
+    episode = PodcastEpisode(
+        podcast_id=podcast.id,
+        guid=f"ep-{path_directory}",
+        title="Edit Episode",
+        source_audio_url="https://example.com/ep.mp3",
+    )
+    session.add(episode)
+    session.commit()
+    session.refresh(episode)
+
+    episode.podcast.directory.mkdir(parents=True, exist_ok=True)
+    # Clean any artefacts from prior test runs (settings.podcasts_dir is a
+    # relative path so the directory persists between sessions).
+    for p in (episode.mp3_path, episode.raw_path, episode.srt_path, episode.ads_path):
+        if p.exists():
+            p.unlink()
+    _silent_mp3(episode.mp3_path, 10_000)
+    episode.cut_regions = [_region(start, end) for start, end in cuts_s]
+    session.add(episode)
+    session.commit()
+    session.refresh(episode)
+    return episode
+
+
+def test_edit_episode_keeps_raw_by_default(session):
+    from app.services.editor import edit_episode
+
+    episode = _make_episode_with_cuts(session, "edit_show_keep_raw", [(2, 4)])
+
+    edit_episode(episode)
+
+    assert episode.raw_path.exists()
+    assert len(_load_mp3(episode.raw_path)) == pytest.approx(10_000, abs=300)
+    assert len(AudioSegment.from_mp3(episode.mp3_path)) == pytest.approx(8_000, abs=300)
+
+
+def test_edit_episode_skips_raw_when_disabled(session):
+    from app.services.editor import edit_episode
+
+    episode = _make_episode_with_cuts(session, "edit_show_no_raw", [(2, 4)])
+
+    edit_episode(episode, keep_raw=False)
+
+    assert not episode.raw_path.exists()
+    assert len(AudioSegment.from_mp3(episode.mp3_path)) == pytest.approx(8_000, abs=300)
+
+
 # ── Pipeline chain routing ────────────────────────────────────────────────────
 
 
