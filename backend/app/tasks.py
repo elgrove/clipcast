@@ -136,7 +136,7 @@ def task_transcribe(self, episode_id: str, report_id: str) -> None:
         audio_path = episode.mp3_path
         srt_path = episode.srt_path
         provider = get_ai_provider("transcription", config)
-        model_provider = config.transcription_model.provider
+        model_provider = config.transcription_model.provider.kind
         model_name = config.transcription_model.name
 
     # Update report with model info
@@ -215,7 +215,7 @@ def task_analyse(self, episode_id: str, report_id: str) -> None:
             raise ValueError("Analysis model not configured")
 
         provider = get_ai_provider("analysis", config)
-        model_provider = config.analysis_model.provider
+        model_provider = config.analysis_model.provider.kind
         model_name = config.analysis_model.name
 
     _update_report(report_id, analysis_model_id=config.analysis_model_id)
@@ -421,9 +421,9 @@ def task_analyse_acast_breaks(self, episode_id: str, report_id: str) -> None:
                 transcription_model_id = config.transcription_model_id
                 analysis_model_id = config.analysis_model_id
                 transcription_model_name = config.transcription_model.name
-                transcription_provider_name = config.transcription_model.provider
+                transcription_provider_name = config.transcription_model.provider.kind
                 analysis_model_name = config.analysis_model.name
-                analysis_provider_name = config.analysis_model.provider
+                analysis_provider_name = config.analysis_model.provider.kind
             except ValueError as e:
                 _log_report(report_id, f"Acast break analysis skipped — {e}")
                 _update_report(
@@ -714,7 +714,7 @@ def _get_transcription_queue(session: Session) -> str:
     if (
         config
         and config.transcription_model
-        and Provider(config.transcription_model.provider) == Provider.WHISPER_CPP
+        and Provider(config.transcription_model.provider.kind) == Provider.WHISPER_CPP
     ):
         return "whisper"
     return "ai"

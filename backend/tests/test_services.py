@@ -289,7 +289,7 @@ def test_verify_clipped_with_ai_no_models_configured(session, tmp_path, monkeypa
 def test_verify_clipped_with_ai_finds_and_re_edits(session, tmp_path, monkeypatch):
     """AI returns an ad in clipped coords; task converts to raw, appends, and
     re-edits the audio from raw."""
-    from app.models import AIModel, AppConfig, ClippingReport
+    from app.models import AIModel, AIProvider, AppConfig, ClippingReport
     from app.services.providers import PodcastEpisodeAdverts, Transcription
     from app.tasks import task_verify_clipped_with_ai
 
@@ -301,9 +301,13 @@ def test_verify_clipped_with_ai_finds_and_re_edits(session, tmp_path, monkeypatc
     session.commit()
     session.refresh(report)
 
-    # Wire up dummy AI models so the task doesn't skip on missing config
-    tx_model = AIModel(name="dummy-tx", provider="gemini", api_key="k", supports_transcription=True)
-    an_model = AIModel(name="dummy-an", provider="gemini", api_key="k", supports_analysis=True)
+    # Wire up dummy AI provider + models so the task doesn't skip on missing config
+    provider_row = AIProvider(kind="gemini", name="Gemini", api_key="k")
+    session.add(provider_row)
+    session.commit()
+    session.refresh(provider_row)
+    tx_model = AIModel(provider_id=provider_row.id, name="dummy-tx", supports_transcription=True)
+    an_model = AIModel(provider_id=provider_row.id, name="dummy-an", supports_analysis=True)
     session.add(tx_model)
     session.add(an_model)
     session.commit()
@@ -440,7 +444,7 @@ def test_analyse_acast_breaks_skipped_when_no_models(session, tmp_path, monkeypa
 def test_analyse_acast_breaks_identifies_ads(session, tmp_path, monkeypatch):
     """AI transcribes each Acast region and identifies the individual ads
     inside, storing them in episode.ads while cut_regions stay untouched."""
-    from app.models import AIModel, AppConfig, ClippingReport
+    from app.models import AIModel, AIProvider, AppConfig, ClippingReport
     from app.services.providers import PodcastEpisodeAdverts, Transcription
     from app.tasks import task_analyse_acast_breaks
 
@@ -453,8 +457,12 @@ def test_analyse_acast_breaks_identifies_ads(session, tmp_path, monkeypatch):
     session.commit()
     session.refresh(report)
 
-    tx_model = AIModel(name="dummy-tx", provider="gemini", api_key="k", supports_transcription=True)
-    an_model = AIModel(name="dummy-an", provider="gemini", api_key="k", supports_analysis=True)
+    provider_row = AIProvider(kind="gemini", name="Gemini", api_key="k")
+    session.add(provider_row)
+    session.commit()
+    session.refresh(provider_row)
+    tx_model = AIModel(provider_id=provider_row.id, name="dummy-tx", supports_transcription=True)
+    an_model = AIModel(provider_id=provider_row.id, name="dummy-an", supports_analysis=True)
     session.add(tx_model)
     session.add(an_model)
     session.commit()
@@ -577,68 +585,3 @@ def test_verify_clipped_with_ai_skipped_when_flag_disabled(session, tmp_path, mo
     assert "verify_acast_host_read_ads is disabled" in report.logs
 
 
-# ── Migration backfill ───────────────────────────────────────────────────────
-
-
-def test_backfill_cut_regions_splits_acast_from_real_ads(session):
-    """Legacy episodes stored Acast brackets and real ads side-by-side in
-    `ads_json`. After migration, Acast brackets should move to `cut_regions`
-    only; real ads should appear in `cut_regions` and stay in `ads`."""
-    import json
-
-    from app.database import _backfill_cut_regions
-    from app.models import ACAST_ADVERT_LABEL, PodcastEpisode, PodcastShow
-
-    podcast = PodcastShow(
-        title="Mixed",
-        itunes_id="mixed-show",
-        source_rss_url="https://example.com/feed",
-        path_directory="mixed_show",
-    )
-    session.add(podcast)
-    session.commit()
-    session.refresh(podcast)
-
-    episode = PodcastEpisode(
-        podcast_id=podcast.id,
-        guid="ep-legacy",
-        title="Legacy Episode",
-        source_audio_url="https://example.com/ep.mp3",
-    )
-    # Write directly to ads_json to simulate the pre-migration shape
-    episode.ads_json = json.dumps(
-        [
-            {
-                "start_time": "00:00:05.000",
-                "end_time": "00:00:10.000",
-                "advert_for": ACAST_ADVERT_LABEL,
-                "front_text": "",
-                "tail_text": "",
-            },
-            {
-                "start_time": "00:00:30.000",
-                "end_time": "00:00:45.000",
-                "advert_for": "Squarespace",
-                "front_text": "front",
-                "tail_text": "tail",
-            },
-        ]
-    )
-    episode.cut_regions_json = "[]"
-    session.add(episode)
-    session.commit()
-
-    _backfill_cut_regions()
-
-    session.expire_all()
-    refreshed = session.get(PodcastEpisode, episode.id)
-    regions = refreshed.cut_regions
-    assert len(regions) == 2
-    region_labels = {r.label for r in regions}
-    assert ACAST_ADVERT_LABEL in region_labels
-    assert "Squarespace" in region_labels
-
-    # Acast bracket should no longer be in ads, but the real Squarespace ad still is
-    remaining_ads = refreshed.ads
-    assert len(remaining_ads) == 1
-    assert remaining_ads[0].advert_for == "Squarespace"

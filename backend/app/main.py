@@ -9,7 +9,7 @@ from fastapi.staticfiles import StaticFiles
 
 from app.config import settings
 from app.database import init_db
-from app.routers import config, episodes, feed, podcasts, reports, search
+from app.routers import config, episodes, feed, podcasts, providers, reports, search
 
 logging.basicConfig(
     level=logging.DEBUG if settings.debug else logging.INFO,
@@ -45,6 +45,7 @@ app.add_middleware(
 app.include_router(podcasts.router)
 app.include_router(episodes.router)
 app.include_router(config.router)
+app.include_router(providers.router)
 app.include_router(search.router)
 app.include_router(feed.router)
 app.include_router(reports.router)

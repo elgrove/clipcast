@@ -5,6 +5,7 @@ from enum import StrEnum
 from pathlib import Path
 
 from pydantic import BaseModel as PydanticBaseModel
+from sqlalchemy import UniqueConstraint
 from sqlmodel import Column, Field, Relationship, SQLModel, Text
 
 from app.config import settings
@@ -134,26 +135,46 @@ def new_uuid() -> str:
 # ── Database models ──────────────────────────────────────────────────────────
 
 
-class AIModel(SQLModel, table=True):
-    __tablename__ = "ai_models"
+class AIProvider(SQLModel, table=True):
+    __tablename__ = "ai_providers"
 
     id: str = Field(default_factory=new_uuid, primary_key=True)
     created_at: datetime = Field(default_factory=datetime.utcnow)
     updated_at: datetime = Field(default_factory=datetime.utcnow)
+    kind: str = Field(max_length=20)
     name: str = Field(unique=True, max_length=100)
-    provider: str = Field(max_length=20)
-    host: str = Field(default="")
-    is_preset: bool = Field(default=False)
     api_key: str = Field(default="")
     base_url: str = Field(default="")
+
+    models: list["AIModel"] = Relationship(
+        back_populates="provider",
+        sa_relationship_kwargs={"cascade": "all, delete-orphan"},
+    )
+
+
+class AIModel(SQLModel, table=True):
+    __tablename__ = "ai_models"
+    __table_args__ = (
+        UniqueConstraint("provider_id", "name", name="uq_ai_model_provider_name"),
+    )
+
+    id: str = Field(default_factory=new_uuid, primary_key=True)
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+    updated_at: datetime = Field(default_factory=datetime.utcnow)
+    provider_id: str = Field(foreign_key="ai_providers.id")
+    name: str = Field(max_length=100)
     supports_transcription: bool = Field(default=False)
     supports_analysis: bool = Field(default=False)
-    is_recommended: bool = Field(default=False)
     input_price: float = Field(default=0)
     output_price: float = Field(default=0)
 
+    provider: AIProvider = Relationship(
+        back_populates="models",
+        sa_relationship_kwargs={"lazy": "joined"},
+    )
+
     def __str__(self) -> str:
-        return f"{Provider(self.provider).label} - {self.name}"
+        return f"{self.provider.name} - {self.name}"
 
 
 class AppConfig(SQLModel, table=True):
@@ -162,8 +183,6 @@ class AppConfig(SQLModel, table=True):
     id: str = Field(default="config", primary_key=True)
     transcription_model_id: str | None = Field(default=None, foreign_key="ai_models.id")
     analysis_model_id: str | None = Field(default=None, foreign_key="ai_models.id")
-    gemini_api_key: str = Field(default="")
-    openrouter_api_key: str = Field(default="")
     identify_ads_in_acast_breaks: bool = Field(default=False)
 
     transcription_model: AIModel | None = Relationship(
@@ -461,8 +480,6 @@ class PodcastShowUpdate(PydanticBaseModel):
 class ConfigRead(PydanticBaseModel):
     transcription_model_id: str | None
     analysis_model_id: str | None
-    gemini_api_key: str = ""
-    openrouter_api_key: str = ""
     identify_ads_in_acast_breaks: bool = False
     transcription_model: "AIModelRead | None" = None
     analysis_model: "AIModelRead | None" = None
@@ -471,50 +488,60 @@ class ConfigRead(PydanticBaseModel):
 class ConfigUpdate(PydanticBaseModel):
     transcription_model_id: str | None = None
     analysis_model_id: str | None = None
-    # gemini_api_key and openrouter_api_key accepted but ignored (deprecated;
-    # api keys are now stored per-model)
-    gemini_api_key: str | None = None
-    openrouter_api_key: str | None = None
     identify_ads_in_acast_breaks: bool | None = None
+
+
+class AIProviderRead(PydanticBaseModel):
+    id: str
+    kind: str
+    name: str
+    base_url: str = ""
+    has_api_key: bool = False
+
+
+class AIProviderCreate(PydanticBaseModel):
+    kind: str
+    name: str | None = None
+    api_key: str = ""
+    base_url: str = ""
+    auto_create_recommended: bool = False
+
+
+class AIProviderUpdate(PydanticBaseModel):
+    name: str | None = None
+    api_key: str | None = None
+    base_url: str | None = None
 
 
 class AIModelRead(PydanticBaseModel):
     id: str
+    provider_id: str
     name: str
-    provider: str
-    host: str
-    api_key: str = ""
-    base_url: str = ""
-    is_preset: bool
+    provider_kind: str
+    provider_name: str
     input_price: float
     output_price: float
     supports_transcription: bool = False
     supports_analysis: bool = False
-    is_recommended: bool = False
     display_name: str = ""
 
 
 class AIModelCreate(PydanticBaseModel):
+    provider_id: str
     name: str
-    provider: str
-    host: str = ""
-    api_key: str = ""
-    base_url: str = ""
     supports_transcription: bool = False
     supports_analysis: bool = False
 
 
 class AIModelUpdate(PydanticBaseModel):
     name: str | None = None
-    api_key: str | None = None
-    base_url: str | None = None
     supports_transcription: bool | None = None
     supports_analysis: bool | None = None
     input_price: float | None = None
     output_price: float | None = None
 
 
-class ModelTestResult(PydanticBaseModel):
+class ProviderTestResult(PydanticBaseModel):
     ok: bool
     message: str
     latency_ms: int

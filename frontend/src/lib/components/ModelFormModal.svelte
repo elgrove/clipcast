@@ -1,32 +1,20 @@
 <script lang="ts">
-    import type { AIModel } from '$lib/types';
+    import type { AIModel, AIProvider, ProviderKind } from '$lib/types';
     import { addModel, updateModel } from '$lib/api';
-    import { testModel } from '$lib/api';
-    import type { TestResult } from '$lib/types';
 
-    type Provider = 'gemini' | 'openai-compatible' | 'openrouter' | 'whisper.cpp';
-
-    const PROVIDER_INFO: Record<Provider, { label: string; description: string }> = {
-        'gemini': { label: 'Gemini', description: 'Single model handles transcription and analysis.' },
-        'openai-compatible': { label: 'OpenAI-compatible', description: 'Any OpenAI-compatible API endpoint. Different models recommended per task.' },
-        'openrouter': { label: 'OpenRouter', description: 'Route to many models via a single API. Different models recommended per task.' },
-        'whisper.cpp': { label: 'Whisper.cpp', description: 'Local transcription — free, runs on your hardware. Transcription only.' },
-    };
-
-    function getRecommended(p: Provider, tx: boolean, an: boolean): string | null {
-        if (p === 'whisper.cpp') return null;
-        if (p === 'gemini') return 'gemini-2.5-flash';
+    function getRecommended(k: ProviderKind, tx: boolean, an: boolean): string | null {
+        if (k === 'whisper.cpp' || k === 'openai-compatible') return null;
         const onlyTx = tx && !an;
         const onlyAn = an && !tx;
-        if (p === 'openai-compatible') {
+        if (!onlyTx && !onlyAn) return null;
+        if (k === 'gemini') return 'gemini-2.5-flash';
+        if (k === 'openai') {
             if (onlyTx) return 'gpt-4o-mini-transcribe';
             if (onlyAn) return 'gpt-4.1-mini';
-            return null;
         }
-        if (p === 'openrouter') {
+        if (k === 'openrouter') {
             if (onlyTx) return 'openai/whisper-large-v3';
             if (onlyAn) return 'google/gemini-2.5-flash';
-            return null;
         }
         return null;
     }
@@ -34,74 +22,51 @@
     let {
         open = $bindable(false),
         editModel = null as AIModel | null,
+        providers = [] as AIProvider[],
         onSaved,
     }: {
         open: boolean;
         editModel?: AIModel | null;
+        providers: AIProvider[];
         onSaved: (model: AIModel) => void;
     } = $props();
 
-    let provider = $state<Provider>('gemini');
-    let modelName = $state('gemini-2.5-flash');
-    let modelSource = $state<'recommended' | 'custom'>('recommended');
-    let apiKey = $state('');
-    let baseUrl = $state('');
+    let providerId = $state('');
+    let modelName = $state('');
+    let modelSource = $state<'recommended' | 'custom'>('custom');
     let supportsTranscription = $state(true);
     let supportsAnalysis = $state(true);
     let saving = $state(false);
-    let testResult: TestResult | null = $state(null);
-    let testing = $state(false);
-    let savedModelId: string | null = $state(null);
+    let error: string | null = $state(null);
 
-    const recommendedId = $derived(getRecommended(provider, supportsTranscription, supportsAnalysis));
+    const selectedProvider = $derived(providers.find((p) => p.id === providerId) ?? null);
+    const providerKind = $derived<ProviderKind | null>(selectedProvider?.kind ?? null);
+    const isWhisper = $derived(providerKind === 'whisper.cpp');
 
-    const customPlaceholder = $derived(
-        provider === 'gemini'
-            ? 'e.g. gemini-2.5-flash'
-            : provider === 'openai-compatible'
-                ? 'e.g. gpt-4o-mini-transcribe'
-                : provider === 'openrouter'
-                    ? 'e.g. anthropic/claude-3.5-sonnet'
-                    : 'e.g. model-id'
+    const recommendedId = $derived(
+        providerKind ? getRecommended(providerKind, supportsTranscription, supportsAnalysis) : null
     );
 
-    $effect(() => {
-        if (open) {
-            if (editModel) {
-                provider = editModel.provider as Provider;
-                modelName = editModel.name;
-                apiKey = editModel.api_key || '';
-                baseUrl = editModel.base_url || '';
-                supportsTranscription = editModel.supports_transcription;
-                supportsAnalysis = editModel.supports_analysis;
-                savedModelId = editModel.id;
-                const rec = getRecommended(provider, supportsTranscription, supportsAnalysis);
-                modelSource = rec && rec === editModel.name ? 'recommended' : 'custom';
-            } else {
-                provider = 'gemini';
-                supportsTranscription = true;
-                supportsAnalysis = true;
-                modelSource = 'recommended';
-                modelName = getRecommended('gemini', true, true) ?? '';
-                apiKey = '';
-                baseUrl = '';
-                savedModelId = null;
-            }
-            testResult = null;
-        }
+    const customPlaceholder = $derived.by(() => {
+        if (providerKind === 'gemini') return 'e.g. gemini-2.5-flash';
+        if (providerKind === 'openai' || providerKind === 'openai-compatible') return 'e.g. gpt-4o-mini-transcribe';
+        if (providerKind === 'openrouter') return 'e.g. anthropic/claude-3.5-sonnet';
+        return 'e.g. model-id';
     });
 
-    // Keep modelName in sync with recommendedId when user is on "recommended" radio
     $effect(() => {
-        if (!editModel && modelSource === 'recommended' && recommendedId) {
-            modelName = recommendedId;
-        }
-    });
-
-    function setProvider(p: Provider) {
-        provider = p;
-        if (!editModel) {
-            if (p === 'whisper.cpp') {
+        if (!open) return;
+        error = null;
+        if (editModel) {
+            providerId = editModel.provider_id;
+            modelName = editModel.name;
+            supportsTranscription = editModel.supports_transcription;
+            supportsAnalysis = editModel.supports_analysis;
+            modelSource = 'custom';
+        } else {
+            providerId = providers[0]?.id ?? '';
+            const startKind = providers[0]?.kind ?? null;
+            if (startKind === 'whisper.cpp') {
                 supportsTranscription = true;
                 supportsAnalysis = false;
                 modelName = 'whisper.cpp';
@@ -109,73 +74,77 @@
             } else {
                 supportsTranscription = true;
                 supportsAnalysis = true;
-                const rec = getRecommended(p, true, true);
+                const rec = startKind ? getRecommended(startKind, true, true) : null;
                 modelSource = rec ? 'recommended' : 'custom';
                 modelName = rec ?? '';
             }
         }
-        testResult = null;
+    });
+
+    // When user is on "recommended", keep modelName synced with the current rec.
+    $effect(() => {
+        if (!editModel && modelSource === 'recommended' && recommendedId) {
+            modelName = recommendedId;
+        }
+    });
+
+    function handleProviderChange() {
+        if (editModel) return;
+        if (isWhisper) {
+            supportsTranscription = true;
+            supportsAnalysis = false;
+            modelName = 'whisper.cpp';
+            modelSource = 'recommended';
+            return;
+        }
+        supportsTranscription = true;
+        supportsAnalysis = true;
+        if (providerKind) {
+            const rec = getRecommended(providerKind, true, true);
+            modelSource = rec ? 'recommended' : 'custom';
+            modelName = rec ?? '';
+        }
     }
 
     async function handleSave() {
+        if (saving) return;
         saving = true;
+        error = null;
         try {
-            let model: AIModel;
+            const name = isWhisper ? 'whisper.cpp' : modelName.trim();
+            if (!providerId) throw new Error('Pick a provider');
+            if (!name) throw new Error('Model name is required');
+            let saved: AIModel;
             if (editModel) {
-                model = await updateModel(editModel.id, {
-                    api_key: apiKey,
-                    base_url: baseUrl || (provider === 'whisper.cpp' ? baseUrl : undefined),
+                saved = await updateModel(editModel.id, {
                     supports_transcription: supportsTranscription,
                     supports_analysis: supportsAnalysis,
                 });
             } else {
-                const name = provider === 'whisper.cpp' ? 'whisper.cpp' : modelName.trim();
-                model = await addModel({
+                saved = await addModel({
+                    provider_id: providerId,
                     name,
-                    provider,
-                    api_key: apiKey,
-                    base_url: baseUrl,
                     supports_transcription: supportsTranscription,
                     supports_analysis: supportsAnalysis,
                 });
-                savedModelId = model.id;
             }
-            onSaved(model);
+            onSaved(saved);
             open = false;
         } catch (e: any) {
-            alert(e.message || 'Failed to save model');
+            error = e.message || 'Failed to save model';
         } finally {
             saving = false;
-        }
-    }
-
-    async function handleTest() {
-        if (!savedModelId) {
-            // Save first then test
-            await handleSave();
-            return;
-        }
-        testing = true;
-        testResult = null;
-        try {
-            testResult = await testModel(savedModelId);
-        } catch (e: any) {
-            testResult = { ok: false, message: e.message || 'Test failed', latency_ms: 0 };
-        } finally {
-            testing = false;
         }
     }
 </script>
 
 {#if open}
-    <!-- Backdrop -->
     <div
         class="fixed inset-0 z-40 bg-black/40"
         onclick={() => (open = false)}
         role="presentation"
     ></div>
 
-    <!-- Modal -->
     <div class="fixed inset-0 z-50 flex items-center justify-center p-4">
         <div class="w-full max-w-lg rounded-xl border border-zinc-200 bg-white shadow-xl dark:border-zinc-700 dark:bg-zinc-900">
             <div class="border-b border-zinc-200 px-6 py-4 dark:border-zinc-700">
@@ -185,35 +154,30 @@
             </div>
 
             <div class="space-y-5 px-6 py-5">
-                <!-- Provider tabs -->
                 <div>
-                    <p class="mb-2 text-xs font-medium uppercase tracking-wide text-zinc-500 dark:text-zinc-400">Provider</p>
-                    <div class="flex flex-wrap gap-2">
-                        {#each Object.entries(PROVIDER_INFO) as [p, info]}
-                            <button
-                                onclick={() => setProvider(p as Provider)}
-                                disabled={!!editModel}
-                                class="rounded-md border px-3 py-1.5 text-sm font-medium transition-colors disabled:cursor-default
-                                    {provider === p
-                                        ? 'border-emerald-500 bg-emerald-50 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300'
-                                        : 'border-zinc-200 bg-white text-zinc-600 hover:bg-zinc-50 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-300 dark:hover:bg-zinc-700'}"
-                            >
-                                {info.label}
-                            </button>
+                    <label for="model-provider" class="mb-2 block text-xs font-medium uppercase tracking-wide text-zinc-500 dark:text-zinc-400">Provider</label>
+                    <select
+                        id="model-provider"
+                        value={providerId}
+                        onchange={(e) => {
+                            providerId = e.currentTarget.value;
+                            handleProviderChange();
+                        }}
+                        disabled={!!editModel}
+                        class="w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm outline-none focus:border-emerald-500 disabled:cursor-not-allowed disabled:opacity-60 dark:border-zinc-700 dark:bg-zinc-800 dark:text-white"
+                    >
+                        {#each providers as p (p.id)}
+                            <option value={p.id}>{p.name}</option>
                         {/each}
-                    </div>
-                    <p class="mt-2 text-xs text-zinc-500 dark:text-zinc-400">
-                        {PROVIDER_INFO[provider].description}
-                    </p>
+                    </select>
                 </div>
 
-                <!-- Model selector (hidden for whisper.cpp) -->
-                {#if provider !== 'whisper.cpp'}
+                <!-- Model selector (hidden for whisper.cpp — the name is fixed) -->
+                {#if !isWhisper}
                     <div>
                         <p class="mb-2 text-sm font-medium text-zinc-700 dark:text-zinc-300">Model</p>
                         <div class="space-y-2">
-                            <label class="flex items-start gap-2 text-sm
-                                {recommendedId ? 'cursor-pointer' : 'cursor-not-allowed opacity-50'}">
+                            <label class="flex items-start gap-2 text-sm {recommendedId ? 'cursor-pointer' : 'cursor-not-allowed opacity-50'}">
                                 <input
                                     type="radio"
                                     name="model-source"
@@ -229,7 +193,11 @@
                                     </span>
                                     {#if !recommendedId}
                                         <span class="mt-0.5 block text-xs text-zinc-500 dark:text-zinc-400">
-                                            Different models are recommended for each task — use Custom, or untick one capability below.
+                                            {#if providerKind === 'openai-compatible'}
+                                                No recommendation — enter your endpoint's model id below.
+                                            {:else}
+                                                Different models are recommended for each task — use Custom, or untick one capability below.
+                                            {/if}
                                         </span>
                                     {/if}
                                 </span>
@@ -262,58 +230,23 @@
                     </div>
                 {/if}
 
-                <!-- API key (hidden for whisper.cpp) -->
-                {#if provider !== 'whisper.cpp'}
-                    <div>
-                        <label for="modal-api-key" class="block text-sm font-medium text-zinc-700 dark:text-zinc-300">
-                            API key <span class="font-normal text-zinc-400">(saved per model)</span>
-                        </label>
-                        <input
-                            id="modal-api-key"
-                            type="password"
-                            bind:value={apiKey}
-                            placeholder="sk-..."
-                            class="mt-1 w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500/20 dark:border-zinc-700 dark:bg-zinc-800 dark:text-white dark:placeholder-zinc-500"
-                        />
-                    </div>
-                {/if}
-
-                <!-- Base URL (shown for openai-compatible and whisper.cpp) -->
-                {#if provider === 'openai-compatible' || provider === 'whisper.cpp'}
-                    <div>
-                        <label for="modal-base-url" class="block text-sm font-medium text-zinc-700 dark:text-zinc-300">
-                            {provider === 'whisper.cpp' ? 'Host URL' : 'Base URL'}
-                        </label>
-                        <input
-                            id="modal-base-url"
-                            type="text"
-                            bind:value={baseUrl}
-                            placeholder={provider === 'whisper.cpp' ? 'http://localhost:8080' : 'https://api.openai.com/v1'}
-                            class="mt-1 w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500/20 dark:border-zinc-700 dark:bg-zinc-800 dark:text-white dark:placeholder-zinc-500"
-                        />
-                    </div>
-                {/if}
-
-                <!-- Capabilities -->
                 <div>
                     <p class="mb-2 text-sm font-medium text-zinc-700 dark:text-zinc-300">Use for</p>
                     <div class="flex gap-4">
-                        <label class="flex items-center gap-2 text-sm text-zinc-700 dark:text-zinc-300
-                            {provider === 'whisper.cpp' ? 'cursor-not-allowed opacity-70' : 'cursor-pointer'}">
+                        <label class="flex items-center gap-2 text-sm text-zinc-700 dark:text-zinc-300 {isWhisper ? 'cursor-not-allowed opacity-70' : 'cursor-pointer'}">
                             <input
                                 type="checkbox"
                                 bind:checked={supportsTranscription}
-                                disabled={provider === 'whisper.cpp'}
+                                disabled={isWhisper}
                                 class="h-4 w-4 rounded border-zinc-300 text-emerald-600 focus:ring-emerald-500"
                             />
                             Transcription
                         </label>
-                        <label class="flex items-center gap-2 text-sm text-zinc-700 dark:text-zinc-300
-                            {provider === 'whisper.cpp' ? 'cursor-not-allowed opacity-50' : 'cursor-pointer'}">
+                        <label class="flex items-center gap-2 text-sm text-zinc-700 dark:text-zinc-300 {isWhisper ? 'cursor-not-allowed opacity-50' : 'cursor-pointer'}">
                             <input
                                 type="checkbox"
                                 bind:checked={supportsAnalysis}
-                                disabled={provider === 'whisper.cpp'}
+                                disabled={isWhisper}
                                 class="h-4 w-4 rounded border-zinc-300 text-emerald-600 focus:ring-emerald-500"
                             />
                             Analysis
@@ -321,24 +254,9 @@
                     </div>
                 </div>
 
-                <!-- Test connection -->
-                <div class="flex items-center gap-3">
-                    <button
-                        onclick={handleTest}
-                        disabled={testing || saving}
-                        class="inline-flex items-center gap-1.5 rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm font-medium text-zinc-700 transition-colors hover:bg-zinc-50 disabled:opacity-50 dark:border-zinc-600 dark:bg-zinc-800 dark:text-zinc-300 dark:hover:bg-zinc-700"
-                    >
-                        {#if testing}
-                            <div class="h-4 w-4 animate-spin rounded-full border-2 border-zinc-300 border-t-zinc-700 dark:border-t-zinc-200"></div>
-                        {/if}
-                        Test connection
-                    </button>
-                    {#if testResult}
-                        <span class="text-sm {testResult.ok ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-500 dark:text-red-400'}">
-                            {testResult.ok ? `✓ Connected (${testResult.latency_ms}ms)` : `✗ ${testResult.message}`}
-                        </span>
-                    {/if}
-                </div>
+                {#if error}
+                    <p class="text-sm text-red-600 dark:text-red-400">{error}</p>
+                {/if}
             </div>
 
             <div class="flex justify-end gap-3 border-t border-zinc-200 px-6 py-4 dark:border-zinc-700">

@@ -44,25 +44,36 @@ export interface EpisodeListResponse {
 export interface Config {
 	transcription_model_id: string | null;
 	analysis_model_id: string | null;
-	gemini_api_key?: string;
 	identify_ads_in_acast_breaks: boolean;
 	transcription_model: AIModel | null;
 	analysis_model: AIModel | null;
 }
 
+export type ProviderKind =
+	| 'gemini'
+	| 'openai'
+	| 'openrouter'
+	| 'openai-compatible'
+	| 'whisper.cpp';
+
+export interface AIProvider {
+	id: string;
+	kind: ProviderKind;
+	name: string;
+	base_url: string;
+	has_api_key: boolean;
+}
+
 export interface AIModel {
 	id: string;
+	provider_id: string;
 	name: string;
-	provider: string;
-	host: string;
-	api_key: string;
-	base_url: string;
-	is_preset: boolean;
+	provider_kind: ProviderKind;
+	provider_name: string;
 	input_price: number;
 	output_price: number;
 	supports_transcription: boolean;
 	supports_analysis: boolean;
-	is_recommended: boolean;
 	display_name: string;
 }
 
