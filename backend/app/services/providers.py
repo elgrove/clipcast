@@ -317,10 +317,6 @@ class OpenAIProvider(OpenAICompatibleProvider):
 
 class OpenRouterProvider(OpenAICompatibleProvider):
     base_url = "https://openrouter.ai/api/v1"
-    default_headers = {
-        "HTTP-Referer": "https://github.com/elgrove/clipcast",
-        "X-Title": "Clipcast",
-    }
 
     def _extra_request_kwargs(self) -> dict:
         return {"extra_body": {"usage": {"include": True}}}

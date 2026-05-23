@@ -158,17 +158,14 @@ def test_openrouter_provider_analyse_adverts_happy_path(monkeypatch):
     assert report.output_tokens == 80
     assert report.cost_usd == 0.0042
 
-    # Client was pointed at OpenRouter and given the leaderboard headers
+    # Client was pointed at OpenRouter; no leaderboard headers attached
     assert _FakeOpenAI.last_init_kwargs["base_url"] == "https://openrouter.ai/api/v1"
     assert _FakeOpenAI.last_init_kwargs["api_key"] == "sk-or-v1-test"
     call = _FakeOpenAI.last_call_kwargs
     assert call["model"] == "anthropic/claude-sonnet-4"
     assert call["response_format"] is PodcastEpisodeAdverts
     assert call["timeout"] == ANALYSIS_TIMEOUT
-    assert call["extra_headers"] == {
-        "HTTP-Referer": "https://github.com/elgrove/clipcast",
-        "X-Title": "Clipcast",
-    }
+    assert call["extra_headers"] is None
     assert call["extra_body"] == {"usage": {"include": True}}
 
 
