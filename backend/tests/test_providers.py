@@ -1,5 +1,5 @@
-"""Tests for the OpenAI-compatible provider base class, OpenRouterProvider,
-and the get_ai_provider() selector wiring for OpenRouter."""
+"""Tests for the OpenAI-compatible provider base class, OpenAIProvider,
+OpenRouterProvider, and the get_ai_provider() selector wiring."""
 
 from types import SimpleNamespace
 
@@ -14,6 +14,7 @@ from app.models import (
 from app.services.providers import (
     ANALYSIS_TIMEOUT,
     OpenAICompatibleProvider,
+    OpenAIProvider,
     OpenRouterProvider,
     PodcastEpisodeAdverts,
     Transcription,
@@ -30,6 +31,25 @@ def _openrouter_model(api_key: str = "sk-or-v1-test") -> AIModel:
         api_key=api_key,
         input_price=0.0,
         output_price=0.0,
+    )
+
+
+def _openai_model(
+    name: str = "gpt-4o-mini",
+    api_key: str = "sk-test",
+    input_price: float = 0.0,
+    output_price: float = 0.0,
+    supports_transcription: bool = False,
+    supports_analysis: bool = True,
+) -> AIModel:
+    return AIModel(
+        name=name,
+        provider="openai",
+        api_key=api_key,
+        input_price=input_price,
+        output_price=output_price,
+        supports_transcription=supports_transcription,
+        supports_analysis=supports_analysis,
     )
 
 
@@ -182,6 +202,70 @@ def test_openrouter_provider_appends_custom_instructions(monkeypatch):
     prompt = _FakeOpenAI.last_call_kwargs["messages"][0]["content"]
     assert "Additional instructions:" in prompt
     assert "Ignore mentions of Patreon." in prompt
+
+
+# ── OpenAIProvider ───────────────────────────────────────────────────────────
+
+
+def test_get_ai_provider_returns_openai_provider(session):
+    model = _openai_model()
+    session.add(model)
+    session.commit()
+    session.refresh(model)
+
+    config = session.get(AppConfig, "config")
+    config.analysis_model_id = model.id
+    session.add(config)
+    session.commit()
+    session.refresh(config)
+
+    provider = get_ai_provider("analysis", config)
+    assert isinstance(provider, OpenAIProvider)
+    assert provider.model_config.api_key == "sk-test"
+    assert provider.model_config.name == "gpt-4o-mini"
+
+
+def test_get_ai_provider_openai_requires_api_key(session):
+    model = _openai_model(api_key="")
+    session.add(model)
+    session.commit()
+    session.refresh(model)
+
+    config = session.get(AppConfig, "config")
+    config.analysis_model_id = model.id
+    session.add(config)
+    session.commit()
+    session.refresh(config)
+
+    with pytest.raises(ValueError, match="No API key configured"):
+        get_ai_provider("analysis", config)
+
+
+def test_openai_provider_analyse_adverts_happy_path(monkeypatch):
+    # OpenAI's response has no `cost` field — base class falls back to calculate_cost
+    _patch_openai(monkeypatch, _fake_completion(cost=None))
+
+    model = _openai_model(input_price=15.0, output_price=60.0)
+    provider = OpenAIProvider(model_config=model)
+    report = AnalysisReport()
+
+    result = provider.analyse_adverts(Transcription(segments=[]), report=report)
+
+    assert len(result.adverts) == 1
+    assert report.input_tokens == 1200
+    assert report.output_tokens == 80
+    expected = provider.calculate_cost(1200, 80, model)
+    assert report.cost_usd == expected
+
+    assert _FakeOpenAI.last_init_kwargs["base_url"] == "https://api.openai.com/v1"
+    assert _FakeOpenAI.last_init_kwargs["api_key"] == "sk-test"
+    call = _FakeOpenAI.last_call_kwargs
+    assert call["model"] == "gpt-4o-mini"
+    assert call["response_format"] is PodcastEpisodeAdverts
+    assert call["timeout"] == ANALYSIS_TIMEOUT
+    # No OpenRouter-only extras leak in
+    assert call["extra_headers"] is None
+    assert "extra_body" not in call
 
 
 # ── Shared base class reuse ──────────────────────────────────────────────────

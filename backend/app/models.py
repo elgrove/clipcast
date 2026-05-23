@@ -87,16 +87,18 @@ class ClipMode(StrEnum):
 
 class Provider(StrEnum):
     GEMINI = "gemini"
-    OPENAI_COMPATIBLE = "openai-compatible"
+    OPENAI = "openai"
     OPENROUTER = "openrouter"
+    OPENAI_COMPATIBLE = "openai-compatible"
     WHISPER_CPP = "whisper.cpp"  # symbol renamed from WHISPER; string value unchanged
 
     @property
     def label(self) -> str:
         labels = {
             Provider.GEMINI: "Gemini",
-            Provider.OPENAI_COMPATIBLE: "OpenAI-compatible",
+            Provider.OPENAI: "OpenAI",
             Provider.OPENROUTER: "OpenRouter",
+            Provider.OPENAI_COMPATIBLE: "OpenAI-compatible",
             Provider.WHISPER_CPP: "Whisper.cpp",
         }
         return labels[self]
