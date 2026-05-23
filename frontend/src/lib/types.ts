@@ -75,6 +75,7 @@ export interface AIModel {
 	output_price: number;
 	supports_transcription: boolean;
 	supports_analysis: boolean;
+	context_window: number;
 	display_name: string;
 }
 

@@ -5,7 +5,33 @@ from collections.abc import Callable
 from dataclasses import dataclass
 
 from app.models import AIModel, AIProvider, Provider
-from app.services.providers import AIProviderBase, GeminiProvider
+from app.services.openrouter_models import fetch_context_length
+from app.services.providers import (
+    AIProviderBase,
+    GeminiProvider,
+    OpenAICompatibleProvider,
+    OpenAIProvider,
+    OpenRouterProvider,
+)
+
+# Same defaults the app uses for context-window auto-derivation. Kept in sync
+# with backend/app/routers/config.py:DEFAULT_CONTEXT_WINDOWS — if you change
+# one, change both.
+GEMINI_CONTEXT_WINDOW = 1_048_576
+OPENAI_CONTEXT_WINDOW = 262_144
+OPENAI_COMPATIBLE_CONTEXT_WINDOW = 131_072
+
+# Process-local memo so a bake-off across N OpenRouter models hits the catalogue
+# endpoint once instead of N times.
+_openrouter_context_cache: dict[str, int] = {}
+
+
+def _openrouter_context(model_name: str, api_key: str) -> int:
+    if model_name in _openrouter_context_cache:
+        return _openrouter_context_cache[model_name]
+    value = fetch_context_length(model_name, api_key) or OPENAI_COMPATIBLE_CONTEXT_WINDOW
+    _openrouter_context_cache[model_name] = value
+    return value
 
 # Bare-name → provider shortcut for the evals harness. Add entries here when a
 # new model gets common enough that typing the provider prefix is tedious.
@@ -33,6 +59,15 @@ GEMINI_PRICING: dict[str, tuple[int, int]] = {
     "gemini-3-flash-preview": (50, 300),  # $0.50 in / $3.00 out per 1M tokens
 }
 
+# OpenAI list pricing (cents per 1M tokens). Source: https://openai.com/api/pricing
+# (verified 2026-05-22). Only needed as a fallback — OpenAI returns token usage
+# but not cost, so without an entry here `calculate_cost` returns 0.
+OPENAI_PRICING: dict[str, tuple[int, int]] = {
+    "gpt-5": (125, 1000),
+    "gpt-5-mini": (25, 200),
+    "gpt-5-nano": (5, 40),
+}
+
 
 def _gemini_factory(model_name: str, api_key: str) -> AIProviderBase:
     input_price, output_price = GEMINI_PRICING.get(model_name, (0, 0))
@@ -46,9 +81,79 @@ def _gemini_factory(model_name: str, api_key: str) -> AIProviderBase:
         name=model_name,
         input_price=input_price,
         output_price=output_price,
+        context_window=GEMINI_CONTEXT_WINDOW,
     )
     model_config.provider = provider_config
     return GeminiProvider(provider_config=provider_config, model_config=model_config)
+
+
+def _openai_factory(model_name: str, api_key: str) -> AIProviderBase:
+    input_price, output_price = OPENAI_PRICING.get(model_name, (0, 0))
+    provider_config = AIProvider(
+        kind=Provider.OPENAI.value,
+        name="OpenAI",
+        api_key=api_key,
+    )
+    model_config = AIModel(
+        provider_id=provider_config.id,
+        name=model_name,
+        input_price=input_price,
+        output_price=output_price,
+        context_window=OPENAI_CONTEXT_WINDOW,
+    )
+    model_config.provider = provider_config
+    return OpenAIProvider(provider_config=provider_config, model_config=model_config)
+
+
+def _openrouter_factory(model_name: str, api_key: str) -> AIProviderBase:
+    # OpenRouter returns the authoritative dollar cost in `usage.cost` on every
+    # response (see OpenRouterProvider._extract_cost), so we don't need a local
+    # pricing table — leave list prices at zero and rely on response-side cost.
+    # Context window is fetched live from OpenRouter's /api/v1/models, cached
+    # per-process so a multi-model bake-off only hits the catalogue once.
+    provider_config = AIProvider(
+        kind=Provider.OPENROUTER.value,
+        name="OpenRouter",
+        api_key=api_key,
+    )
+    model_config = AIModel(
+        provider_id=provider_config.id,
+        name=model_name,
+        input_price=0,
+        output_price=0,
+        context_window=_openrouter_context(model_name, api_key),
+    )
+    model_config.provider = provider_config
+    return OpenRouterProvider(provider_config=provider_config, model_config=model_config)
+
+
+def _openai_compatible_factory(model_name: str, api_key: str) -> AIProviderBase:
+    # Generic OpenAI-compatible endpoints need a base URL — pulled from the
+    # OPENAI_COMPATIBLE_BASE_URL env var so a single registry entry can target
+    # any vendor. Pricing must be set by the caller; left at zero by default.
+    base_url = os.environ.get("OPENAI_COMPATIBLE_BASE_URL", "")
+    if not base_url:
+        raise ProviderError(
+            "OPENAI_COMPATIBLE_BASE_URL is not set. The 'openai-compatible' eval "
+            "provider needs a base URL (e.g. http://localhost:8000/v1)."
+        )
+    provider_config = AIProvider(
+        kind=Provider.OPENAI_COMPATIBLE.value,
+        name="OpenAI-compatible",
+        api_key=api_key,
+        base_url=base_url,
+    )
+    model_config = AIModel(
+        provider_id=provider_config.id,
+        name=model_name,
+        input_price=0,
+        output_price=0,
+        context_window=OPENAI_COMPATIBLE_CONTEXT_WINDOW,
+    )
+    model_config.provider = provider_config
+    return OpenAICompatibleProvider(
+        provider_config=provider_config, model_config=model_config
+    )
 
 
 REGISTRY: dict[str, ProviderSpec] = {
@@ -56,6 +161,21 @@ REGISTRY: dict[str, ProviderSpec] = {
         name="gemini",
         api_key_env="GEMINI_API_KEY",
         factory=_gemini_factory,
+    ),
+    "openai": ProviderSpec(
+        name="openai",
+        api_key_env="OPENAI_API_KEY",
+        factory=_openai_factory,
+    ),
+    "openrouter": ProviderSpec(
+        name="openrouter",
+        api_key_env="OPENROUTER_API_KEY",
+        factory=_openrouter_factory,
+    ),
+    "openai-compatible": ProviderSpec(
+        name="openai-compatible",
+        api_key_env="OPENAI_COMPATIBLE_API_KEY",
+        factory=_openai_compatible_factory,
     ),
 }
 
@@ -80,6 +200,10 @@ def parse_model_spec(spec: str) -> ModelSpec:
     Accepts either:
       - ``provider:model_name`` (explicit) — e.g. ``gemini:gemini-2.5-flash``
       - ``model_name`` alone — provider inferred from KNOWN_BARE_MODELS
+
+    Provider-prefixed specs may contain further colons or slashes in the model
+    portion (e.g. ``openrouter:meta-llama/llama-4-scout``) — only the first
+    ``:`` is treated as the provider separator.
 
     Raises ProviderError if the provider can't be determined or isn't registered.
     """
@@ -114,6 +238,7 @@ def build_provider(spec: ModelSpec) -> AIProviderBase:
     api_key = os.environ.get(entry.api_key_env, "")
     if not api_key:
         raise ProviderError(
-            f"{entry.api_key_env} is not set. Add it to backend/.env or export it in your shell."
+            f"{entry.api_key_env} is not set. Add it to backend/evals/.env.evals "
+            f"or export it in your shell."
         )
     return entry.factory(spec.model, api_key)

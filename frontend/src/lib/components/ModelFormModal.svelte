@@ -227,6 +227,12 @@
                                 </span>
                             </label>
                         </div>
+                        {#if supportsAnalysis}
+                            <p class="mt-2 text-xs text-zinc-500 dark:text-zinc-400">
+                                For analysis we recommend a model with at least 256k context.
+                                Smaller models still work but episodes longer than 2 hours will be split into overlapping chunks.
+                            </p>
+                        {/if}
                     </div>
                 {/if}
 

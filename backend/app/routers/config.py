@@ -17,6 +17,7 @@ from app.models import (
     ConfigRead,
     ConfigUpdate,
     PodcastShow,
+    Provider,
 )
 
 logger = logging.getLogger("clipcast")
@@ -34,6 +35,7 @@ def _ai_model_to_read(model: AIModel) -> AIModelRead:
         output_price=model.output_price,
         supports_transcription=model.supports_transcription,
         supports_analysis=model.supports_analysis,
+        context_window=model.context_window,
         display_name=str(model),
     )
 
@@ -97,6 +99,29 @@ def list_models(session: Session = Depends(get_session)):
     return [_ai_model_to_read(m) for m in models]
 
 
+# Provider context-window defaults. OpenRouter is looked up live per model;
+# everything else is hardcoded against the vendor's published spec.
+DEFAULT_CONTEXT_WINDOWS: dict[str, int] = {
+    Provider.GEMINI.value: 1_048_576,
+    Provider.OPENAI.value: 262_144,
+    Provider.OPENAI_COMPATIBLE.value: 131_072,
+    Provider.WHISPER_CPP.value: 0,
+}
+
+
+def _resolve_context_window(provider: str, model_name: str, api_key: str) -> int:
+    if provider == Provider.OPENROUTER.value:
+        from app.services.openrouter_models import fetch_context_length
+
+        fetched = fetch_context_length(model_name, api_key)
+        if fetched > 0:
+            return fetched
+        # Catalogue miss — fall back to the safe small default so chunking
+        # still kicks in on long episodes.
+        return DEFAULT_CONTEXT_WINDOWS[Provider.OPENAI_COMPATIBLE.value]
+    return DEFAULT_CONTEXT_WINDOWS.get(provider, 0)
+
+
 @router.post("/models", response_model=AIModelRead, status_code=201)
 def create_model(data: AIModelCreate, session: Session = Depends(get_session)):
     provider = session.get(AIProvider, data.provider_id)
@@ -116,16 +141,23 @@ def create_model(data: AIModelCreate, session: Session = Depends(get_session)):
             detail=f"Model '{name}' already exists for provider '{provider.name}'",
         )
 
+    context_window = _resolve_context_window(provider.kind, name, provider.api_key)
     model = AIModel(
         provider_id=provider.id,
         name=name,
         supports_transcription=data.supports_transcription,
         supports_analysis=data.supports_analysis,
+        context_window=context_window,
     )
     session.add(model)
     session.commit()
     session.refresh(model)
-    logger.info("Model created: %s on provider %s", model.name, provider.name)
+    logger.info(
+        "Model created: %s on provider %s (context_window=%d)",
+        model.name,
+        provider.name,
+        model.context_window,
+    )
     return _ai_model_to_read(model)
 
 
