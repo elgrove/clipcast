@@ -311,12 +311,12 @@ class OpenAICompatibleProvider(AIProviderBase):
         return None
 
 
+class OpenAIProvider(OpenAICompatibleProvider):
+    base_url = "https://api.openai.com/v1"
+
+
 class OpenRouterProvider(OpenAICompatibleProvider):
     base_url = "https://openrouter.ai/api/v1"
-    default_headers = {
-        "HTTP-Referer": "https://github.com/elgrove/clipcast",
-        "X-Title": "Clipcast",
-    }
 
     def _extra_request_kwargs(self) -> dict:
         return {"extra_body": {"usage": {"include": True}}}
@@ -352,11 +352,14 @@ def get_ai_provider(task_type: str, config: AppConfig) -> AIProviderBase:
             raise ValueError("No Gemini API key configured")
         return GeminiProvider(api_key=api_key, model_config=model_config)
 
-    if provider_type == Provider.OPENAI_COMPATIBLE:
-        return OpenAICompatibleProvider(model_config=model_config)
+    if provider_type == Provider.OPENAI:
+        return OpenAIProvider(model_config=model_config)
 
     if provider_type == Provider.OPENROUTER:
         return OpenRouterProvider(model_config=model_config)
+
+    if provider_type == Provider.OPENAI_COMPATIBLE:
+        return OpenAICompatibleProvider(model_config=model_config)
 
     if provider_type == Provider.WHISPER_CPP:
         return WhisperProvider(model_config=model_config)

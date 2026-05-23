@@ -8,6 +8,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from app.config import settings
+from app.database import init_db
 from app.routers import config, episodes, feed, podcasts, reports, search
 
 logging.basicConfig(
@@ -20,6 +21,7 @@ logger = logging.getLogger("clipcast")
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     settings.podcasts_path.mkdir(parents=True, exist_ok=True)
+    init_db()
     logger.info("Clipcast started")
     yield
     logger.info("Clipcast shutting down")
