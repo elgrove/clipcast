@@ -34,4 +34,5 @@ frontend/.svelte-kit/
 frontend/build/
 frontend/node_modules/
 AGENTS.md
+CLAUDE.md
 _django_secret_key.txt
