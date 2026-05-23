@@ -184,6 +184,7 @@ class AppConfig(SQLModel, table=True):
     transcription_model_id: str | None = Field(default=None, foreign_key="ai_models.id")
     analysis_model_id: str | None = Field(default=None, foreign_key="ai_models.id")
     identify_ads_in_acast_breaks: bool = Field(default=False)
+    keep_raw_episodes: bool = Field(default=True)
 
     transcription_model: AIModel | None = Relationship(
         sa_relationship_kwargs={
@@ -481,6 +482,7 @@ class ConfigRead(PydanticBaseModel):
     transcription_model_id: str | None
     analysis_model_id: str | None
     identify_ads_in_acast_breaks: bool = False
+    keep_raw_episodes: bool = True
     transcription_model: "AIModelRead | None" = None
     analysis_model: "AIModelRead | None" = None
 
@@ -489,6 +491,7 @@ class ConfigUpdate(PydanticBaseModel):
     transcription_model_id: str | None = None
     analysis_model_id: str | None = None
     identify_ads_in_acast_breaks: bool | None = None
+    keep_raw_episodes: bool | None = None
 
 
 class AIProviderRead(PydanticBaseModel):

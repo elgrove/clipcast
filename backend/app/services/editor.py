@@ -102,7 +102,9 @@ def apply_cuts_inplace(
     return len(segments)
 
 
-def edit_episode(episode: PodcastEpisode, force: bool = False) -> None:
+def edit_episode(
+    episode: PodcastEpisode, *, keep_raw: bool = True, force: bool = False
+) -> None:
     if not episode.mp3_path.exists():
         raise ValueError(f"Episode {episode.title} has no downloaded MP3")
 
@@ -114,23 +116,29 @@ def edit_episode(episode: PodcastEpisode, force: bool = False) -> None:
 
     logger.info("Editing episode: %s", episode.title)
 
-    temp_fd, temp_path_str = tempfile.mkstemp(suffix=".mp3")
-    temp_path = Path(temp_path_str)
-    os.close(temp_fd)
+    if keep_raw:
+        temp_fd, temp_path_str = tempfile.mkstemp(suffix=".mp3")
+        temp_path = Path(temp_path_str)
+        os.close(temp_fd)
 
-    try:
-        shutil.copy(episode.mp3_path, temp_path)
+        try:
+            shutil.copy(episode.mp3_path, temp_path)
 
+            cuts = apply_cuts_inplace(episode.mp3_path, episode.cut_regions, label=episode.title)
+            if cuts == 0:
+                return
+
+            shutil.move(temp_path, episode.raw_path)
+            logger.info("Edited episode, removed %d segments", cuts)
+
+        finally:
+            if temp_path.exists():
+                temp_path.unlink()
+    else:
         cuts = apply_cuts_inplace(episode.mp3_path, episode.cut_regions, label=episode.title)
         if cuts == 0:
             return
-
-        shutil.move(temp_path, episode.raw_path)
-        logger.info("Edited episode, removed %d segments", cuts)
-
-    finally:
-        if temp_path.exists():
-            temp_path.unlink()
+        logger.info("Edited episode (no raw backup), removed %d segments", cuts)
 
 
 def re_edit_from_raw(episode: PodcastEpisode) -> int:

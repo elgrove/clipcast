@@ -4,6 +4,17 @@ def test_get_config(client):
     data = response.json()
     assert "transcription_model_id" in data
     assert "analysis_model_id" in data
+    assert data["keep_raw_episodes"] is True
+
+
+def test_update_keep_raw_episodes(client):
+    response = client.put("/api/config", json={"keep_raw_episodes": False})
+    assert response.status_code == 200
+    assert response.json()["keep_raw_episodes"] is False
+
+    response = client.put("/api/config", json={"keep_raw_episodes": True})
+    assert response.status_code == 200
+    assert response.json()["keep_raw_episodes"] is True
 
 
 def test_list_models_empty_by_default(client):

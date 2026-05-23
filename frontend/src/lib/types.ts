@@ -45,6 +45,7 @@ export interface Config {
 	transcription_model_id: string | null;
 	analysis_model_id: string | null;
 	identify_ads_in_acast_breaks: boolean;
+	keep_raw_episodes: boolean;
 	transcription_model: AIModel | null;
 	analysis_model: AIModel | null;
 }
