@@ -187,6 +187,88 @@ def duration_metrics(predicted: list[Interval], expected: list[Interval]) -> Dur
     )
 
 
+# ── Boundary deltas ──────────────────────────────────────────────────────────
+
+
+@dataclass
+class BoundaryMetrics:
+    """Signed and unsigned boundary errors for a set of matched (predicted,
+    expected) interval pairs. All values are in seconds.
+
+    Signed mean (`start_mean` / `end_mean`) catches systematic bias — positive
+    means the prediction edge is later than the ground truth. Unsigned mean
+    is typical magnitude regardless of direction. p95 is the worst-case tail,
+    linearly interpolated so it degrades gracefully on tiny samples.
+
+    `count == 0` is reported via `None`-typed callers; the dataclass itself
+    holds zeros so it round-trips through asdict cleanly."""
+
+    count: int
+    start_mean: float
+    start_abs_mean: float
+    start_abs_p95: float
+    end_mean: float
+    end_abs_mean: float
+    end_abs_p95: float
+    start_deltas: list[float] = field(default_factory=list)
+    end_deltas: list[float] = field(default_factory=list)
+
+
+def _percentile(values: list[float], p: float) -> float:
+    """Linear-interpolated percentile (`p` in [0, 100]). Raises on empty input;
+    returns the single value for n=1."""
+    if not values:
+        raise ValueError("Cannot compute percentile of empty list")
+    if len(values) == 1:
+        return values[0]
+    s = sorted(values)
+    pos = (p / 100.0) * (len(s) - 1)
+    lower = int(pos)
+    upper = min(lower + 1, len(s) - 1)
+    frac = pos - lower
+    return s[lower] * (1 - frac) + s[upper] * frac
+
+
+def boundary_metrics_from_deltas(
+    start_deltas: list[float], end_deltas: list[float]
+) -> BoundaryMetrics:
+    """Aggregate raw per-pair deltas into a `BoundaryMetrics`. Used directly
+    when concatenating across cases for a model-level rollup."""
+    if not start_deltas:
+        return BoundaryMetrics(
+            count=0,
+            start_mean=0.0,
+            start_abs_mean=0.0,
+            start_abs_p95=0.0,
+            end_mean=0.0,
+            end_abs_mean=0.0,
+            end_abs_p95=0.0,
+        )
+    start_abs = [abs(d) for d in start_deltas]
+    end_abs = [abs(d) for d in end_deltas]
+    return BoundaryMetrics(
+        count=len(start_deltas),
+        start_mean=sum(start_deltas) / len(start_deltas),
+        start_abs_mean=sum(start_abs) / len(start_abs),
+        start_abs_p95=_percentile(start_abs, 95),
+        end_mean=sum(end_deltas) / len(end_deltas),
+        end_abs_mean=sum(end_abs) / len(end_abs),
+        end_abs_p95=_percentile(end_abs, 95),
+        start_deltas=list(start_deltas),
+        end_deltas=list(end_deltas),
+    )
+
+
+def boundary_metrics(pairs: list[tuple[Interval, Interval]]) -> BoundaryMetrics:
+    """For each (predicted, expected) pair, compute signed `predicted - expected`
+    deltas at both edges. Aggregate to mean (signed bias), mean-absolute
+    (typical magnitude), and p95-absolute (worst-case tail). All zeros for
+    empty input."""
+    start_deltas = [p.start - e.start for p, e in pairs]
+    end_deltas = [p.end - e.end for p, e in pairs]
+    return boundary_metrics_from_deltas(start_deltas, end_deltas)
+
+
 def cluster_regions(intervals: list[Interval], gap_threshold: float) -> list[Interval]:
     """Merge intervals whose gap to the previous interval is <= gap_threshold.
 

@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 import tomllib
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
 
+from .metrics import BoundaryMetrics, boundary_metrics_from_deltas
 from .pipeline import EvalCase, PipelineResult, load_case, result_to_dict, run_case
 from .providers import ModelSpec, parse_model_spec
 
@@ -203,11 +204,14 @@ class ModelRunSummary:
     break_precision: float
     break_recall: float
     break_f1: float
+    # Boundary drift (aggregated across required matches in all cases)
+    boundary: BoundaryMetrics | None = None
+    break_boundary: BoundaryMetrics | None = None
     # Cost / time
-    total_cost_usd: float
-    total_input_tokens: int
-    total_output_tokens: int
-    total_duration_s: float
+    total_cost_usd: float = 0.0
+    total_input_tokens: int = 0
+    total_output_tokens: int = 0
+    total_duration_s: float = 0.0
     results: list[PipelineResult] = field(default_factory=list)
 
 
@@ -252,6 +256,8 @@ class RunSummary:
                     "break_precision": m.break_precision,
                     "break_recall": m.break_recall,
                     "break_f1": m.break_f1,
+                    "boundary": asdict(m.boundary) if m.boundary else None,
+                    "break_boundary": asdict(m.break_boundary) if m.break_boundary else None,
                     "total_cost_usd": m.total_cost_usd,
                     "total_input_tokens": m.total_input_tokens,
                     "total_output_tokens": m.total_output_tokens,
@@ -297,6 +303,18 @@ def _mean_name_similarity(results: list[PipelineResult]) -> float:
             total += nm.similarity
             total_matches += 1
     return total / total_matches if total_matches else 0.0
+
+
+def _aggregate_boundary(results: list[PipelineResult], attr: str) -> BoundaryMetrics:
+    starts: list[float] = []
+    ends: list[float] = []
+    for r in results:
+        b: BoundaryMetrics | None = getattr(r, attr)
+        if b is None or b.count == 0:
+            continue
+        starts.extend(b.start_deltas)
+        ends.extend(b.end_deltas)
+    return boundary_metrics_from_deltas(starts, ends)
 
 
 def execute_run(config: RunConfig) -> RunSummary:
@@ -367,6 +385,8 @@ def execute_run(config: RunConfig) -> RunSummary:
                     break_precision=br_p,
                     break_recall=br_r,
                     break_f1=br_f1,
+                    boundary=_aggregate_boundary(combined, "boundary"),
+                    break_boundary=_aggregate_boundary(combined, "break_boundary"),
                     total_cost_usd=sum(res.cost_usd or 0.0 for res in combined),
                     total_input_tokens=sum(res.input_tokens or 0 for res in combined),
                     total_output_tokens=sum(res.output_tokens or 0 for res in combined),
@@ -396,6 +416,8 @@ def execute_run(config: RunConfig) -> RunSummary:
                 break_precision=br_p,
                 break_recall=br_r,
                 break_f1=br_f1,
+                boundary=_aggregate_boundary(acast_results, "boundary"),
+                break_boundary=_aggregate_boundary(acast_results, "break_boundary"),
                 total_cost_usd=0.0,
                 total_input_tokens=0,
                 total_output_tokens=0,
