@@ -167,6 +167,7 @@ class AIModel(SQLModel, table=True):
     supports_analysis: bool = Field(default=False)
     input_price: float = Field(default=0)
     output_price: float = Field(default=0)
+    context_window: int = Field(default=0)
 
     provider: AIProvider = Relationship(
         back_populates="models",
@@ -526,6 +527,7 @@ class AIModelRead(PydanticBaseModel):
     output_price: float
     supports_transcription: bool = False
     supports_analysis: bool = False
+    context_window: int = 0
     display_name: str = ""
 
 

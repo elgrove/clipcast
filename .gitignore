@@ -21,6 +21,7 @@ wheels/
 *.db-shm
 *.db-wal
 /*.mp3
+/*.png
 .claude/
 .playwright-mcp/
 .agent

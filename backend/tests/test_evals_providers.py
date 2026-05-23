@@ -30,7 +30,7 @@ def test_parse_model_spec_custom_model_under_known_provider():
 
 def test_parse_model_spec_unknown_provider():
     with pytest.raises(ProviderError, match="Unknown provider"):
-        parse_model_spec("openai:gpt-4o")
+        parse_model_spec("anthropic:claude-3.5-sonnet")
 
 
 def test_parse_model_spec_unknown_bare_model():

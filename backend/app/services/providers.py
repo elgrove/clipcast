@@ -38,6 +38,19 @@ class PodcastEpisodeAdverts(PydanticBaseModel):
     adverts: list[PodcastEpisodeAdvert] = []
 
 
+def _format_chunk_range(chunk_range: tuple[float, float]) -> str:
+    def hhmm(s: float) -> str:
+        h = int(s // 3600)
+        m = int((s % 3600) // 60)
+        return f"{h:02d}:{m:02d}"
+
+    start, end = chunk_range
+    return (
+        f"\n\nNote: this transcript is a window from {hhmm(start)} to {hhmm(end)} of a longer "
+        "episode. Treat this window in isolation when applying the 10-minute rarity rule."
+    )
+
+
 class AIProviderBase(ABC):
     @abstractmethod
     def transcribe(self, audio_path: Path, report: TranscriptionReport = None) -> Transcription:
@@ -49,6 +62,7 @@ class AIProviderBase(ABC):
         transcription: Transcription,
         report: AnalysisReport = None,
         custom_instructions: str | None = None,
+        chunk_range: tuple[float, float] | None = None,
     ) -> PodcastEpisodeAdverts:
         pass
 
@@ -124,6 +138,7 @@ class GeminiProvider(AIProviderBase):
         transcription: Transcription,
         report: AnalysisReport = None,
         custom_instructions: str | None = None,
+        chunk_range: tuple[float, float] | None = None,
     ) -> PodcastEpisodeAdverts:
         logger.info("Analysing adverts with Gemini model %s", self.model_config.name)
 
@@ -134,6 +149,8 @@ class GeminiProvider(AIProviderBase):
 
         transcript_json = json.dumps(transcription.model_dump(), indent=2)
         prompt = ANALYSE_ADVERTS_PROMPT.format(transcript=transcript_json)
+        if chunk_range is not None:
+            prompt += _format_chunk_range(chunk_range)
         if custom_instructions:
             prompt += f"\n\nAdditional instructions:\n{custom_instructions}"
 
@@ -205,6 +222,7 @@ class WhisperProvider(AIProviderBase):
         transcription: Transcription,
         report: AnalysisReport = None,
         custom_instructions: str | None = None,
+        chunk_range: tuple[float, float] | None = None,
     ) -> PodcastEpisodeAdverts:
         raise NotImplementedError("WhisperProvider only supports transcription, not analysis")
 
@@ -259,6 +277,7 @@ class OpenAICompatibleProvider(AIProviderBase):
         transcription: Transcription,
         report: AnalysisReport = None,
         custom_instructions: str | None = None,
+        chunk_range: tuple[float, float] | None = None,
     ) -> PodcastEpisodeAdverts:
         logger.info(
             "Analysing adverts with %s model %s",
@@ -268,6 +287,8 @@ class OpenAICompatibleProvider(AIProviderBase):
 
         transcript_json = json.dumps(transcription.model_dump(), indent=2)
         prompt = ANALYSE_ADVERTS_PROMPT.format(transcript=transcript_json)
+        if chunk_range is not None:
+            prompt += _format_chunk_range(chunk_range)
         if custom_instructions:
             prompt += f"\n\nAdditional instructions:\n{custom_instructions}"
 
