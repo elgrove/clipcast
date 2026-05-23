@@ -14,6 +14,7 @@ from pydantic import BaseModel as PydanticBaseModel
 
 from app.models import (
     AIModel,
+    AIProvider,
     AnalysisReport,
     AppConfig,
     PodcastEpisodeAdvert,
@@ -68,8 +69,11 @@ class AIProviderBase(ABC):
 
 
 class GeminiProvider(AIProviderBase):
-    def __init__(self, api_key: str, model_config: AIModel):
-        self.api_key = api_key
+    def __init__(self, provider_config: AIProvider, model_config: AIModel):
+        if not provider_config.api_key:
+            raise ValueError(f"No API key configured for provider {provider_config.name}")
+        self.api_key = provider_config.api_key
+        self.provider_config = provider_config
         self.model_config = model_config
 
     @staticmethod
@@ -155,7 +159,8 @@ class GeminiProvider(AIProviderBase):
 
 
 class WhisperProvider(AIProviderBase):
-    def __init__(self, model_config: AIModel):
+    def __init__(self, provider_config: AIProvider, model_config: AIModel):
+        self.provider_config = provider_config
         self.model_config = model_config
 
     def _check_health(self, base_url: str) -> None:
@@ -167,9 +172,9 @@ class WhisperProvider(AIProviderBase):
             raise ConnectionError(f"Whisper server unreachable at {base_url}: {e}") from e
 
     def transcribe(self, audio_path: Path, report: TranscriptionReport = None) -> Transcription:
-        base_url = (self.model_config.base_url or self.model_config.host or "").rstrip("/")
+        base_url = (self.provider_config.base_url or "").rstrip("/")
         if not base_url:
-            raise ValueError("No Whisper URL configured for this model")
+            raise ValueError("No Whisper URL configured for this provider")
 
         self._check_health(base_url)
         logger.info("Transcribing with Whisper at %s (file: %s)", base_url, audio_path.name)
@@ -210,18 +215,19 @@ class OpenAICompatibleProvider(AIProviderBase):
 
     Subclasses override class-level config (`base_url`, `default_headers`) and the
     hook methods at the bottom for vendor-specific behaviour. The api_key and any
-    custom base_url come from ``model_config`` (per-model storage)."""
+    custom base_url come from ``provider_config`` (per-provider storage)."""
 
     base_url: ClassVar[str] = ""
     default_headers: ClassVar[dict[str, str]] = {}
 
-    def __init__(self, model_config: AIModel):
+    def __init__(self, provider_config: AIProvider, model_config: AIModel):
+        self.provider_config = provider_config
         self.model_config = model_config
-        if not model_config.api_key:
-            raise ValueError(f"No API key configured for model {model_config.name}")
+        if not provider_config.api_key:
+            raise ValueError(f"No API key configured for provider {provider_config.name}")
 
     def _client(self) -> OpenAI:
-        return OpenAI(api_key=self.model_config.api_key, base_url=self._resolve_base_url())
+        return OpenAI(api_key=self.provider_config.api_key, base_url=self._resolve_base_url())
 
     def transcribe(self, audio_path: Path, report: TranscriptionReport = None) -> Transcription:
         logger.info(
@@ -296,9 +302,9 @@ class OpenAICompatibleProvider(AIProviderBase):
     # ── override points ─────────────────────────────────────────────────────────
 
     def _resolve_base_url(self) -> str:
-        """Default: class-level, falling back to ``model_config.base_url`` for
+        """Default: class-level, falling back to ``provider_config.base_url`` for
         generic OpenAI-compatible endpoints where the user provides a URL."""
-        return self.base_url or self.model_config.base_url
+        return self.base_url or self.provider_config.base_url
 
     def _extra_request_kwargs(self) -> dict:
         """Override to inject extra request kwargs — e.g. OpenRouter's
@@ -341,27 +347,25 @@ def get_ai_provider(task_type: str, config: AppConfig) -> AIProviderBase:
         if not model_config:
             raise ValueError("No analysis model configured")
 
-    provider_type = Provider(model_config.provider)
+    provider_config = model_config.provider
+    provider_kind = Provider(provider_config.kind)
 
-    if task_type == "analysis" and provider_type == Provider.WHISPER_CPP:
+    if task_type == "analysis" and provider_kind == Provider.WHISPER_CPP:
         raise ValueError("Whisper.cpp does not support analysis, only transcription")
 
-    if provider_type == Provider.GEMINI:
-        api_key = model_config.api_key or config.gemini_api_key
-        if not api_key:
-            raise ValueError("No Gemini API key configured")
-        return GeminiProvider(api_key=api_key, model_config=model_config)
+    if provider_kind == Provider.GEMINI:
+        return GeminiProvider(provider_config=provider_config, model_config=model_config)
 
-    if provider_type == Provider.OPENAI:
-        return OpenAIProvider(model_config=model_config)
+    if provider_kind == Provider.OPENAI:
+        return OpenAIProvider(provider_config=provider_config, model_config=model_config)
 
-    if provider_type == Provider.OPENROUTER:
-        return OpenRouterProvider(model_config=model_config)
+    if provider_kind == Provider.OPENROUTER:
+        return OpenRouterProvider(provider_config=provider_config, model_config=model_config)
 
-    if provider_type == Provider.OPENAI_COMPATIBLE:
-        return OpenAICompatibleProvider(model_config=model_config)
+    if provider_kind == Provider.OPENAI_COMPATIBLE:
+        return OpenAICompatibleProvider(provider_config=provider_config, model_config=model_config)
 
-    if provider_type == Provider.WHISPER_CPP:
-        return WhisperProvider(model_config=model_config)
+    if provider_kind == Provider.WHISPER_CPP:
+        return WhisperProvider(provider_config=provider_config, model_config=model_config)
 
-    raise ValueError(f"Unsupported provider: {provider_type}")
+    raise ValueError(f"Unsupported provider kind: {provider_kind}")

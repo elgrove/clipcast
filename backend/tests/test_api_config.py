@@ -12,13 +12,25 @@ def test_list_models_empty_by_default(client):
     assert response.json() == []
 
 
+def _create_gemini_provider(client, api_key="test-key", auto_create=False):
+    return client.post(
+        "/api/providers",
+        json={
+            "kind": "gemini",
+            "api_key": api_key,
+            "auto_create_recommended": auto_create,
+        },
+    )
+
+
 def test_add_custom_model(client):
+    provider = _create_gemini_provider(client).json()
+
     response = client.post(
         "/api/models",
         json={
+            "provider_id": provider["id"],
             "name": "my-custom-model",
-            "provider": "gemini",
-            "api_key": "test-key",
             "supports_transcription": True,
             "supports_analysis": True,
         },
@@ -26,37 +38,49 @@ def test_add_custom_model(client):
     assert response.status_code == 201
     data = response.json()
     assert data["name"] == "my-custom-model"
-    assert data["api_key"] == "test-key"
+    assert data["provider_kind"] == "gemini"
+    assert data["provider_name"] == "Gemini"
     assert data["supports_transcription"] is True
     assert data["supports_analysis"] is True
 
 
-def test_add_custom_openrouter_model(client):
+def test_create_model_requires_existing_provider(client):
     response = client.post(
         "/api/models",
         json={
-            "name": "anthropic/claude-sonnet-4",
-            "provider": "openrouter",
-            "host": "",
+            "provider_id": "nonexistent-provider-id",
+            "name": "anything",
+            "supports_transcription": True,
         },
     )
-    assert response.status_code == 201
-    data = response.json()
-    assert data["name"] == "anthropic/claude-sonnet-4"
-    assert data["provider"] == "openrouter"
-    assert data["is_preset"] is False
+    assert response.status_code == 422
+    assert "provider not found" in response.json()["detail"].lower()
 
-    listed = client.get("/api/models").json()
-    assert any(m["name"] == "anthropic/claude-sonnet-4" for m in listed)
+
+def test_create_model_duplicate_name_on_same_provider(client):
+    provider = _create_gemini_provider(client).json()
+
+    first = client.post(
+        "/api/models",
+        json={"provider_id": provider["id"], "name": "gemini-2.5-flash"},
+    )
+    assert first.status_code == 201
+
+    second = client.post(
+        "/api/models",
+        json={"provider_id": provider["id"], "name": "gemini-2.5-flash"},
+    )
+    assert second.status_code == 422
+    assert "already exists" in second.json()["detail"].lower()
 
 
 def test_update_model(client):
+    provider = _create_gemini_provider(client).json()
     created = client.post(
         "/api/models",
         json={
+            "provider_id": provider["id"],
             "name": "gemini-2.5-flash",
-            "provider": "gemini",
-            "api_key": "",
             "supports_transcription": True,
             "supports_analysis": True,
         },
@@ -64,34 +88,34 @@ def test_update_model(client):
 
     response = client.put(
         f"/api/models/{created['id']}",
-        json={"api_key": "my-gemini-key"},
+        json={"supports_analysis": False},
     )
     assert response.status_code == 200
-    assert response.json()["api_key"] == "my-gemini-key"
+    assert response.json()["supports_analysis"] is False
 
 
 def test_delete_model(client):
-    resp = client.post(
+    provider = _create_gemini_provider(client).json()
+    created = client.post(
         "/api/models",
-        json={"name": "to-delete", "provider": "gemini"},
-    )
-    model_id = resp.json()["id"]
+        json={"provider_id": provider["id"], "name": "to-delete"},
+    ).json()
 
-    response = client.delete(f"/api/models/{model_id}")
+    response = client.delete(f"/api/models/{created['id']}")
     assert response.status_code == 204
 
     models = client.get("/api/models").json()
-    assert not any(m["id"] == model_id for m in models)
+    assert not any(m["id"] == created["id"] for m in models)
 
 
 def test_capability_validation_transcription(client):
     """Cannot set an analysis-only model as transcription model."""
+    provider = _create_gemini_provider(client).json()
     analysis_only = client.post(
         "/api/models",
         json={
+            "provider_id": provider["id"],
             "name": "gpt-4.1-mini",
-            "provider": "openai-compatible",
-            "base_url": "https://api.openai.com/v1",
             "supports_transcription": False,
             "supports_analysis": True,
         },
@@ -107,12 +131,15 @@ def test_capability_validation_transcription(client):
 
 def test_capability_validation_analysis(client):
     """Cannot set a transcription-only model as analysis model."""
+    provider = client.post(
+        "/api/providers",
+        json={"kind": "whisper.cpp", "base_url": "http://localhost:8080"},
+    ).json()
     transcription_only = client.post(
         "/api/models",
         json={
+            "provider_id": provider["id"],
             "name": "whisper.cpp",
-            "provider": "whisper.cpp",
-            "base_url": "http://localhost:8080",
             "supports_transcription": True,
             "supports_analysis": False,
         },
@@ -127,11 +154,17 @@ def test_capability_validation_analysis(client):
 
 
 def test_update_config_with_valid_models(client):
+    gemini_provider = _create_gemini_provider(client).json()
+    whisper_provider = client.post(
+        "/api/providers",
+        json={"kind": "whisper.cpp", "base_url": "http://localhost:8080"},
+    ).json()
+
     gemini = client.post(
         "/api/models",
         json={
+            "provider_id": gemini_provider["id"],
             "name": "gemini-2.5-flash",
-            "provider": "gemini",
             "supports_transcription": True,
             "supports_analysis": True,
         },
@@ -139,9 +172,8 @@ def test_update_config_with_valid_models(client):
     whisper = client.post(
         "/api/models",
         json={
+            "provider_id": whisper_provider["id"],
             "name": "whisper.cpp",
-            "provider": "whisper.cpp",
-            "base_url": "http://localhost:8080",
             "supports_transcription": True,
             "supports_analysis": False,
         },
@@ -158,8 +190,3 @@ def test_update_config_with_valid_models(client):
     data = response.json()
     assert data["transcription_model_id"] == whisper["id"]
     assert data["analysis_model_id"] == gemini["id"]
-
-
-def test_test_model_endpoint_missing(client):
-    response = client.post("/api/models/nonexistent-id/test")
-    assert response.status_code == 404

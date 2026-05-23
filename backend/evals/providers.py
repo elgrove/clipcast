@@ -4,7 +4,7 @@ import os
 from collections.abc import Callable
 from dataclasses import dataclass
 
-from app.models import AIModel, Provider
+from app.models import AIModel, AIProvider, Provider
 from app.services.providers import AIProviderBase, GeminiProvider
 
 # Bare-name → provider shortcut for the evals harness. Add entries here when a
@@ -36,13 +36,19 @@ GEMINI_PRICING: dict[str, tuple[int, int]] = {
 
 def _gemini_factory(model_name: str, api_key: str) -> AIProviderBase:
     input_price, output_price = GEMINI_PRICING.get(model_name, (0, 0))
+    provider_config = AIProvider(
+        kind=Provider.GEMINI.value,
+        name="Gemini",
+        api_key=api_key,
+    )
     model_config = AIModel(
+        provider_id=provider_config.id,
         name=model_name,
-        provider=Provider.GEMINI.value,
         input_price=input_price,
         output_price=output_price,
     )
-    return GeminiProvider(api_key=api_key, model_config=model_config)
+    model_config.provider = provider_config
+    return GeminiProvider(provider_config=provider_config, model_config=model_config)
 
 
 REGISTRY: dict[str, ProviderSpec] = {

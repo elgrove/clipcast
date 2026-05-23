@@ -4,6 +4,8 @@ import type {
 	EpisodeListResponse,
 	Config,
 	AIModel,
+	AIProvider,
+	ProviderKind,
 	TestResult,
 	ClippingReport,
 	ClippingReportDetail,
@@ -159,11 +161,8 @@ export async function getModels(): Promise<AIModel[]> {
 }
 
 export async function addModel(data: {
+	provider_id: string;
 	name: string;
-	provider: string;
-	host?: string;
-	api_key?: string;
-	base_url?: string;
 	supports_transcription?: boolean;
 	supports_analysis?: boolean;
 }): Promise<AIModel> {
@@ -177,8 +176,6 @@ export async function updateModel(
 	id: string,
 	data: {
 		name?: string;
-		api_key?: string;
-		base_url?: string;
 		supports_transcription?: boolean;
 		supports_analysis?: boolean;
 		input_price?: number;
@@ -195,8 +192,39 @@ export async function deleteModel(id: string): Promise<void> {
 	return fetchApi<void>(`/api/models/${id}`, { method: 'DELETE' });
 }
 
-export async function testModel(id: string): Promise<TestResult> {
-	return fetchApi<TestResult>(`/api/models/${id}/test`, { method: 'POST' });
+export async function getProviders(): Promise<AIProvider[]> {
+	return fetchApi<AIProvider[]>('/api/providers');
+}
+
+export async function addProvider(data: {
+	kind: ProviderKind;
+	name?: string;
+	api_key?: string;
+	base_url?: string;
+	auto_create_recommended?: boolean;
+}): Promise<AIProvider> {
+	return fetchApi<AIProvider>('/api/providers', {
+		method: 'POST',
+		body: JSON.stringify(data)
+	});
+}
+
+export async function updateProvider(
+	id: string,
+	data: { name?: string; api_key?: string; base_url?: string }
+): Promise<AIProvider> {
+	return fetchApi<AIProvider>(`/api/providers/${id}`, {
+		method: 'PATCH',
+		body: JSON.stringify(data)
+	});
+}
+
+export async function deleteProvider(id: string): Promise<void> {
+	return fetchApi<void>(`/api/providers/${id}`, { method: 'DELETE' });
+}
+
+export async function testProvider(id: string): Promise<TestResult> {
+	return fetchApi<TestResult>(`/api/providers/${id}/test`, { method: 'POST' });
 }
 
 export async function searchItunes(query: string): Promise<ITunesSearchResult[]> {

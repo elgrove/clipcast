@@ -1,14 +1,24 @@
 <script lang="ts">
-	import { getConfig, updateConfig, getModels, deleteModel, getPodcasts, exportOpml } from '$lib/api';
+	import {
+		getConfig,
+		updateConfig,
+		getModels,
+		deleteModel,
+		getProviders,
+		deleteProvider,
+		getPodcasts,
+		exportOpml,
+	} from '$lib/api';
 	import { toasts, theme } from '$lib/stores';
-	import type { Config, AIModel, PodcastShow } from '$lib/types';
-	import ProviderBadge from '$lib/components/ProviderBadge.svelte';
-	import CapabilityBadge from '$lib/components/CapabilityBadge.svelte';
+	import type { Config, AIModel, AIProvider, PodcastShow } from '$lib/types';
 	import ModelCard from '$lib/components/ModelCard.svelte';
 	import ModelFormModal from '$lib/components/ModelFormModal.svelte';
+	import ProviderCard from '$lib/components/ProviderCard.svelte';
+	import ProviderFormModal from '$lib/components/ProviderFormModal.svelte';
 
 	let config: Config | null = $state(null);
 	let models: AIModel[] = $state([]);
+	let providers: AIProvider[] = $state([]);
 	let podcasts: PodcastShow[] = $state([]);
 	let loading = $state(true);
 
@@ -18,8 +28,11 @@
 	let savingConfig = $state(false);
 	let savingAcastSetting = $state(false);
 
-	let modalOpen = $state(false);
+	let modelModalOpen = $state(false);
 	let editingModel: AIModel | null = $state(null);
+
+	let providerModalOpen = $state(false);
+	let editingProvider: AIProvider | null = $state(null);
 
 	let feedType = $state('clipcast');
 	let currentTheme = $state('auto');
@@ -27,12 +40,19 @@
 
 	const transcriptionModels = $derived(models.filter((m) => m.supports_transcription));
 	const analysisModels = $derived(models.filter((m) => m.supports_analysis));
+	const canAddModel = $derived(providers.length > 0);
 
 	async function load() {
 		try {
-			const [cfg, mdls, pods] = await Promise.all([getConfig(), getModels(), getPodcasts()]);
+			const [cfg, mdls, provs, pods] = await Promise.all([
+				getConfig(),
+				getModels(),
+				getProviders(),
+				getPodcasts(),
+			]);
 			config = cfg;
 			models = mdls;
+			providers = provs;
 			podcasts = pods;
 			transcriptionModelId = cfg.transcription_model_id || '';
 			analysisModelId = cfg.analysis_model_id || '';
@@ -65,7 +85,7 @@
 		savingAcastSetting = true;
 		try {
 			config = await updateConfig({
-				identify_ads_in_acast_breaks: identifyAdsInAcastBreaks
+				identify_ads_in_acast_breaks: identifyAdsInAcastBreaks,
 			});
 			identifyAdsInAcastBreaks = config.identify_ads_in_acast_breaks;
 			toasts.addToast('success', 'Acast break analysis setting saved');
@@ -76,14 +96,52 @@
 		}
 	}
 
-	function openAddModal() {
-		editingModel = null;
-		modalOpen = true;
+	function openAddProviderModal() {
+		editingProvider = null;
+		providerModalOpen = true;
 	}
 
-	function openEditModal(model: AIModel) {
+	function openEditProviderModal(p: AIProvider) {
+		editingProvider = p;
+		providerModalOpen = true;
+	}
+
+	async function handleDeleteProvider(p: AIProvider) {
+		try {
+			await deleteProvider(p.id);
+			providers = providers.filter((x) => x.id !== p.id);
+			toasts.addToast('success', `Provider "${p.name}" deleted`);
+		} catch (e: any) {
+			toasts.addToast('error', e.message || 'Failed to delete');
+		}
+	}
+
+	async function handleProviderSaved(p: AIProvider) {
+		const idx = providers.findIndex((x) => x.id === p.id);
+		if (idx >= 0) {
+			providers = providers.map((x) => (x.id === p.id ? p : x));
+		} else {
+			providers = [...providers, p];
+		}
+		// New models and possibly an updated active-models selection may have
+		// been created server-side via auto_create_recommended — refresh both.
+		const [mdls, cfg] = await Promise.all([getModels(), getConfig()]);
+		models = mdls;
+		config = cfg;
+		transcriptionModelId = cfg.transcription_model_id || '';
+		analysisModelId = cfg.analysis_model_id || '';
+		toasts.addToast('success', `Provider "${p.name}" saved`);
+	}
+
+	function openAddModelModal() {
+		if (!canAddModel) return;
+		editingModel = null;
+		modelModalOpen = true;
+	}
+
+	function openEditModelModal(model: AIModel) {
 		editingModel = model;
-		modalOpen = true;
+		modelModalOpen = true;
 	}
 
 	async function handleDeleteModel(model: AIModel) {
@@ -124,6 +182,72 @@
 	<div class="mx-auto max-w-2xl space-y-6">
 		<h1 class="text-2xl font-bold text-zinc-900 dark:text-white">Configuration</h1>
 
+		<!-- Provider Library -->
+		<div id="provider-library" class="rounded-xl border border-zinc-200 bg-white p-6 dark:border-zinc-800 dark:bg-zinc-900">
+			<div class="flex items-center justify-between">
+				<h2 class="text-lg font-semibold text-zinc-900 dark:text-white">Provider Library</h2>
+				<button
+					onclick={openAddProviderModal}
+					class="inline-flex items-center gap-1.5 rounded-lg bg-emerald-600 px-3 py-1.5 text-sm font-medium text-white transition-colors hover:bg-emerald-700"
+				>
+					<svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+						<path stroke-linecap="round" stroke-linejoin="round" d="M12 4v16m8-8H4" />
+					</svg>
+					Add
+				</button>
+			</div>
+			<div class="mt-4 space-y-3">
+				{#if providers.length === 0}
+					<p class="text-sm text-zinc-500 dark:text-zinc-400">No providers yet — add one to get started. Tick "Create recommended models" and we'll set up your active transcription and analysis models in one step.</p>
+				{:else}
+					{#each providers as p (p.id)}
+						<ProviderCard
+							provider={p}
+							onEdit={openEditProviderModal}
+							onDelete={handleDeleteProvider}
+						/>
+					{/each}
+				{/if}
+			</div>
+		</div>
+
+		<!-- Model Library -->
+		<div id="model-library" class="rounded-xl border border-zinc-200 bg-white p-6 dark:border-zinc-800 dark:bg-zinc-900">
+			<div class="flex items-center justify-between">
+				<h2 class="text-lg font-semibold text-zinc-900 dark:text-white">Model Library</h2>
+				<button
+					onclick={openAddModelModal}
+					disabled={!canAddModel}
+					title={canAddModel ? '' : 'Add a provider first'}
+					class="inline-flex items-center gap-1.5 rounded-lg bg-emerald-600 px-3 py-1.5 text-sm font-medium text-white transition-colors hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-emerald-600"
+				>
+					<svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+						<path stroke-linecap="round" stroke-linejoin="round" d="M12 4v16m8-8H4" />
+					</svg>
+					Add
+				</button>
+			</div>
+			<div class="mt-4 space-y-3">
+				{#if models.length === 0}
+					<p class="text-sm text-zinc-500 dark:text-zinc-400">
+						{#if canAddModel}
+							No models yet — click Add to configure your first one. You'll need at least a transcription model and an analysis model for clipping to work.
+						{:else}
+							Add a provider above first.
+						{/if}
+					</p>
+				{:else}
+					{#each models as model (model.id)}
+						<ModelCard
+							{model}
+							onEdit={openEditModelModal}
+							onDelete={handleDeleteModel}
+						/>
+					{/each}
+				{/if}
+			</div>
+		</div>
+
 		<!-- Active Models -->
 		<div class="rounded-xl border border-zinc-200 bg-white p-6 dark:border-zinc-800 dark:bg-zinc-900">
 			<h2 class="text-lg font-semibold text-zinc-900 dark:text-white">Active Models</h2>
@@ -157,18 +281,6 @@
 							<option value={model.id}>{model.display_name}</option>
 						{/each}
 					</select>
-				</div>
-
-				<!-- Whisper.cpp guidance -->
-				<div class="flex gap-2 rounded-lg bg-zinc-50 p-3 text-xs text-zinc-500 dark:bg-zinc-800/50 dark:text-zinc-400">
-					<svg class="mt-0.5 h-4 w-4 shrink-0 text-zinc-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-						<circle cx="12" cy="12" r="10" /><path stroke-linecap="round" d="M12 8v4m0 4h.01" />
-					</svg>
-					<p>
-						If your library averages 5 or fewer new episodes per day, a local
-						<a href="#model-library" class="underline">Whisper.cpp</a> server (free, runs on your hardware) will easily keep up —
-						and analysis still runs on a cloud LLM.
-					</p>
 				</div>
 
 				<div class="pt-1">
@@ -206,35 +318,6 @@
 						For each Acast ad break detected, transcribe the audio and ask the analysis model to identify the sponsors. Adverts appear in reports with the sponsor name and timing. Requires both transcription and analysis models to be configured above.
 					</span>
 				</label>
-			</div>
-		</div>
-
-		<!-- Model Library -->
-		<div id="model-library" class="rounded-xl border border-zinc-200 bg-white p-6 dark:border-zinc-800 dark:bg-zinc-900">
-			<div class="flex items-center justify-between">
-				<h2 class="text-lg font-semibold text-zinc-900 dark:text-white">Model Library</h2>
-				<button
-					onclick={openAddModal}
-					class="inline-flex items-center gap-1.5 rounded-lg bg-emerald-600 px-3 py-1.5 text-sm font-medium text-white transition-colors hover:bg-emerald-700"
-				>
-					<svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-						<path stroke-linecap="round" stroke-linejoin="round" d="M12 4v16m8-8H4" />
-					</svg>
-					Add
-				</button>
-			</div>
-			<div class="mt-4 space-y-3">
-				{#if models.length === 0}
-					<p class="text-sm text-zinc-500 dark:text-zinc-400">No models yet — click Add to configure your first one. You'll need at least a transcription model and an analysis model for clipping to work.</p>
-				{:else}
-					{#each models as model (model.id)}
-						<ModelCard
-							{model}
-							onEdit={openEditModal}
-							onDelete={handleDeleteModel}
-						/>
-					{/each}
-				{/if}
 			</div>
 		</div>
 
@@ -310,8 +393,16 @@
 	</div>
 {/if}
 
+<ProviderFormModal
+	bind:open={providerModalOpen}
+	editProvider={editingProvider}
+	existingProviders={providers}
+	onSaved={handleProviderSaved}
+/>
+
 <ModelFormModal
-	bind:open={modalOpen}
+	bind:open={modelModalOpen}
 	editModel={editingModel}
+	{providers}
 	onSaved={handleModelSaved}
 />

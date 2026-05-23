@@ -7,6 +7,7 @@ import pytest
 
 from app.models import (
     AIModel,
+    AIProvider,
     AnalysisReport,
     AppConfig,
     PodcastEpisodeAdvert,
@@ -24,33 +25,38 @@ from app.services.providers import (
 # ── Helpers ──────────────────────────────────────────────────────────────────
 
 
-def _openrouter_model(api_key: str = "sk-or-v1-test") -> AIModel:
-    return AIModel(
+def _openrouter_pair(api_key: str = "sk-or-v1-test") -> tuple[AIProvider, AIModel]:
+    provider = AIProvider(kind="openrouter", name="OpenRouter", api_key=api_key)
+    model = AIModel(
+        provider_id=provider.id,
         name="anthropic/claude-sonnet-4",
-        provider="openrouter",
-        api_key=api_key,
         input_price=0.0,
         output_price=0.0,
+        supports_analysis=True,
     )
+    model.provider = provider
+    return provider, model
 
 
-def _openai_model(
+def _openai_pair(
     name: str = "gpt-4o-mini",
     api_key: str = "sk-test",
     input_price: float = 0.0,
     output_price: float = 0.0,
     supports_transcription: bool = False,
     supports_analysis: bool = True,
-) -> AIModel:
-    return AIModel(
+) -> tuple[AIProvider, AIModel]:
+    provider = AIProvider(kind="openai", name="OpenAI", api_key=api_key)
+    model = AIModel(
+        provider_id=provider.id,
         name=name,
-        provider="openai",
-        api_key=api_key,
         input_price=input_price,
         output_price=output_price,
         supports_transcription=supports_transcription,
         supports_analysis=supports_analysis,
     )
+    model.provider = provider
+    return provider, model
 
 
 def _fake_completion(*, cost: float | None = 0.0123, parsed_adverts=None):
@@ -106,8 +112,9 @@ def _patch_openai(monkeypatch, completion):
 
 
 def test_get_ai_provider_openrouter_requires_api_key(session):
-    """Per-model api_key is required for OpenRouter."""
-    model = _openrouter_model(api_key="")
+    """Provider-level api_key is required for OpenRouter."""
+    provider_row, model = _openrouter_pair(api_key="")
+    session.add(provider_row)
     session.add(model)
     session.commit()
     session.refresh(model)
@@ -123,7 +130,8 @@ def test_get_ai_provider_openrouter_requires_api_key(session):
 
 
 def test_get_ai_provider_returns_openrouter_provider(session):
-    model = _openrouter_model()
+    provider_row, model = _openrouter_pair()
+    session.add(provider_row)
     session.add(model)
     session.commit()
     session.refresh(model)
@@ -136,7 +144,7 @@ def test_get_ai_provider_returns_openrouter_provider(session):
 
     provider = get_ai_provider("analysis", config)
     assert isinstance(provider, OpenRouterProvider)
-    assert provider.model_config.api_key == "sk-or-v1-test"
+    assert provider.provider_config.api_key == "sk-or-v1-test"
     assert provider.model_config.name == "anthropic/claude-sonnet-4"
 
 
@@ -146,7 +154,8 @@ def test_get_ai_provider_returns_openrouter_provider(session):
 def test_openrouter_provider_analyse_adverts_happy_path(monkeypatch):
     _patch_openai(monkeypatch, _fake_completion(cost=0.0042))
 
-    provider = OpenRouterProvider(model_config=_openrouter_model())
+    provider_row, model = _openrouter_pair()
+    provider = OpenRouterProvider(provider_config=provider_row, model_config=model)
     transcription = Transcription(segments=[])
     report = AnalysisReport()
 
@@ -172,10 +181,10 @@ def test_openrouter_provider_analyse_adverts_happy_path(monkeypatch):
 def test_openrouter_provider_cost_falls_back_when_response_omits_cost(monkeypatch):
     _patch_openai(monkeypatch, _fake_completion(cost=None))
 
-    model = _openrouter_model()
+    provider_row, model = _openrouter_pair()
     model.input_price = 300  # arbitrary, just to prove calculate_cost ran
     model.output_price = 1500
-    provider = OpenRouterProvider(model_config=model)
+    provider = OpenRouterProvider(provider_config=provider_row, model_config=model)
     report = AnalysisReport()
 
     provider.analyse_adverts(Transcription(segments=[]), report=report)
@@ -189,7 +198,8 @@ def test_openrouter_provider_cost_falls_back_when_response_omits_cost(monkeypatc
 def test_openrouter_provider_appends_custom_instructions(monkeypatch):
     _patch_openai(monkeypatch, _fake_completion())
 
-    provider = OpenRouterProvider(model_config=_openrouter_model())
+    provider_row, model = _openrouter_pair()
+    provider = OpenRouterProvider(provider_config=provider_row, model_config=model)
     provider.analyse_adverts(
         Transcription(segments=[]),
         report=AnalysisReport(),
@@ -205,7 +215,8 @@ def test_openrouter_provider_appends_custom_instructions(monkeypatch):
 
 
 def test_get_ai_provider_returns_openai_provider(session):
-    model = _openai_model()
+    provider_row, model = _openai_pair()
+    session.add(provider_row)
     session.add(model)
     session.commit()
     session.refresh(model)
@@ -218,12 +229,13 @@ def test_get_ai_provider_returns_openai_provider(session):
 
     provider = get_ai_provider("analysis", config)
     assert isinstance(provider, OpenAIProvider)
-    assert provider.model_config.api_key == "sk-test"
+    assert provider.provider_config.api_key == "sk-test"
     assert provider.model_config.name == "gpt-4o-mini"
 
 
 def test_get_ai_provider_openai_requires_api_key(session):
-    model = _openai_model(api_key="")
+    provider_row, model = _openai_pair(api_key="")
+    session.add(provider_row)
     session.add(model)
     session.commit()
     session.refresh(model)
@@ -242,8 +254,8 @@ def test_openai_provider_analyse_adverts_happy_path(monkeypatch):
     # OpenAI's response has no `cost` field — base class falls back to calculate_cost
     _patch_openai(monkeypatch, _fake_completion(cost=None))
 
-    model = _openai_model(input_price=15.0, output_price=60.0)
-    provider = OpenAIProvider(model_config=model)
+    provider_row, model = _openai_pair(input_price=15.0, output_price=60.0)
+    provider = OpenAIProvider(provider_config=provider_row, model_config=model)
     report = AnalysisReport()
 
     result = provider.analyse_adverts(Transcription(segments=[]), report=report)
@@ -279,14 +291,15 @@ def test_openai_compatible_base_is_reusable_without_openrouter_overrides(monkeyp
     class _MyProvider(OpenAICompatibleProvider):
         base_url = "https://api.example.test/v1"
 
+    provider_row = AIProvider(kind="openrouter", name="Example", api_key="example-key")
     model = AIModel(
+        provider_id=provider_row.id,
         name="example/foo",
-        provider="openrouter",
-        api_key="example-key",
         input_price=0,
         output_price=0,
     )
-    provider = _MyProvider(model_config=model)
+    model.provider = provider_row
+    provider = _MyProvider(provider_config=provider_row, model_config=model)
     report = AnalysisReport()
 
     result = provider.analyse_adverts(Transcription(segments=[]), report=report)
