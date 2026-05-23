@@ -22,6 +22,7 @@ wheels/
 *.db-wal
 /*.mp3
 .claude/
+.playwright-mcp/
 .agent
 _project
 project.md
