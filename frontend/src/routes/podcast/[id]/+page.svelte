@@ -174,6 +174,18 @@
 		}
 	}
 
+	async function copyRssFeed() {
+		if (!podcast) return;
+		showOverflowMenu = false;
+		const url = `${window.location.origin}/feed/${podcast.itunes_id}`;
+		try {
+			await navigator.clipboard.writeText(url);
+			toasts.addToast('success', 'RSS feed link copied');
+		} catch {
+			toasts.addToast('error', 'Failed to copy link');
+		}
+	}
+
 	function initSettingsFields() {
 		settingsClipMode = (podcast?.clip_mode ?? 'ai') as 'off' | 'ai' | 'acast';
 		cleanupKeepDays = podcast?.cleanup_keep_days?.toString() ?? '';
@@ -494,17 +506,15 @@
 									</svg>
 									Settings
 								</button>
-								<a
-									href="/feed/{podcast.itunes_id}"
-									target="_blank"
-									onclick={() => (showOverflowMenu = false)}
+								<button
+									onclick={copyRssFeed}
 									class="flex w-full items-center gap-3 px-4 py-3 text-left text-sm text-zinc-700 active:bg-zinc-100 dark:text-zinc-300 dark:active:bg-zinc-700"
 								>
 									<svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
 										<path stroke-linecap="round" stroke-linejoin="round" d="M6 5c7.18 0 13 5.82 13 13M6 11a7 7 0 017 7m-6 0a1 1 0 11-2 0 1 1 0 012 0z" />
 									</svg>
-									RSS Feed
-								</a>
+									Copy RSS feed link
+								</button>
 								<div class="border-t border-zinc-200 dark:border-zinc-700"></div>
 								<button
 									onclick={() => { showOverflowMenu = false; showDeleteModal = true; }}
@@ -559,16 +569,15 @@
 						</svg>
 						Settings
 					</button>
-					<a
-						href="/feed/{podcast.itunes_id}"
-						target="_blank"
+					<button
+						onclick={copyRssFeed}
 						class="inline-flex items-center gap-1.5 rounded-lg bg-zinc-200 px-3 py-1.5 text-sm font-medium text-zinc-700 transition-colors hover:bg-zinc-300 dark:bg-zinc-800 dark:text-zinc-300 dark:hover:bg-zinc-700"
 					>
 						<svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
 							<path stroke-linecap="round" stroke-linejoin="round" d="M6 5c7.18 0 13 5.82 13 13M6 11a7 7 0 017 7m-6 0a1 1 0 11-2 0 1 1 0 012 0z" />
 						</svg>
-						RSS Feed
-					</a>
+						Copy RSS feed link
+					</button>
 					<button
 						onclick={() => (showDeleteModal = true)}
 						class="inline-flex items-center gap-1.5 rounded-lg bg-red-100 px-3 py-1.5 text-sm font-medium text-red-700 transition-colors hover:bg-red-200 dark:bg-red-900/30 dark:text-red-400 dark:hover:bg-red-900/50"
