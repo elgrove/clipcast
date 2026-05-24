@@ -12,7 +12,6 @@ export interface PodcastShow {
 	cleanup_keep_days: number | null;
 	cleanup_keep_count: number | null;
 	custom_prompt: string;
-	verify_acast_host_read_ads: boolean;
 }
 
 export interface PodcastEpisode {
@@ -29,7 +28,8 @@ export interface PodcastEpisode {
 	is_clipped: boolean;
 	is_cleaned: boolean;
 	has_transcription: boolean;
-	ad_count: number;
+	ad_break_count: number;
+	ad_break_seconds: number;
 	clipping_status: string | null;
 }
 
@@ -44,7 +44,6 @@ export interface EpisodeListResponse {
 export interface Config {
 	transcription_model_id: string | null;
 	analysis_model_id: string | null;
-	identify_ads_in_acast_breaks: boolean;
 	keep_raw_episodes: boolean;
 	transcription_model: AIModel | null;
 	analysis_model: AIModel | null;
@@ -120,7 +119,7 @@ export interface ClippingReportDetail {
 	analysis_input_tokens: number | null;
 	analysis_output_tokens: number | null;
 	analysis_cost: number | null;
-	adverts_found: number | null;
+	ad_breaks_found: number | null;
 	has_exceptions: boolean;
 }
 

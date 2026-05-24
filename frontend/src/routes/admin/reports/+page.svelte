@@ -98,7 +98,7 @@
 						<th class="px-4 py-3">Queued</th>
 						<th class="px-4 py-3">Transcription</th>
 						<th class="px-4 py-3">Analysis</th>
-						<th class="px-4 py-3">Ads</th>
+						<th class="px-4 py-3">Ad breaks</th>
 						<th class="px-4 py-3">Tokens</th>
 						<th class="px-4 py-3">Cost</th>
 					</tr>
@@ -163,8 +163,8 @@
 								{/if}
 							</td>
 							<td class="px-4 py-3">
-								{#if report.adverts_found !== null}
-									<span class="font-medium text-zinc-900 dark:text-zinc-100">{report.adverts_found}</span>
+								{#if report.ad_breaks_found !== null}
+									<span class="font-medium text-zinc-900 dark:text-zinc-100">{report.ad_breaks_found}</span>
 								{:else}
 									<span class="text-zinc-400 dark:text-zinc-600">—</span>
 								{/if}
@@ -232,8 +232,8 @@
 							<p class="mt-0.5 text-zinc-700 dark:text-zinc-300">{formatDate(report.queued_at)}</p>
 						</div>
 						<div>
-							<span class="text-zinc-500 dark:text-zinc-500">Ads</span>
-							<p class="mt-0.5 font-medium text-zinc-700 dark:text-zinc-300">{report.adverts_found ?? '—'}</p>
+							<span class="text-zinc-500 dark:text-zinc-500">Ad breaks</span>
+							<p class="mt-0.5 font-medium text-zinc-700 dark:text-zinc-300">{report.ad_breaks_found ?? '—'}</p>
 						</div>
 						<div>
 							<span class="text-zinc-500 dark:text-zinc-500">Cost</span>

@@ -73,7 +73,6 @@ export async function updatePodcast(
 		cleanup_keep_days?: number | null;
 		cleanup_keep_count?: number | null;
 		custom_prompt?: string;
-		verify_acast_host_read_ads?: boolean;
 	}
 ): Promise<PodcastShow> {
 	return fetchApi<PodcastShow>(`/api/podcasts/${id}`, {
@@ -147,7 +146,6 @@ export async function updateConfig(
 	data: Partial<{
 		transcription_model_id: string | null;
 		analysis_model_id: string | null;
-		identify_ads_in_acast_breaks: boolean;
 		keep_raw_episodes: boolean;
 	}>
 ): Promise<Config> {
