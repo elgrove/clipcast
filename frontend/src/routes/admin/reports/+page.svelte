@@ -47,7 +47,11 @@
 	}
 
 	function totalCost(report: ClippingReportDetail): number {
-		return (report.transcription_cost || 0) + (report.analysis_cost || 0);
+		return (
+			(report.transcription_cost || 0) +
+			(report.analysis_cost || 0) +
+			(report.refinement_cost || 0)
+		);
 	}
 
 	async function load() {
@@ -98,6 +102,7 @@
 						<th class="px-4 py-3">Queued</th>
 						<th class="px-4 py-3">Transcription</th>
 						<th class="px-4 py-3">Analysis</th>
+						<th class="px-4 py-3">Refinement</th>
 						<th class="px-4 py-3">Ad breaks</th>
 						<th class="px-4 py-3">Tokens</th>
 						<th class="px-4 py-3">Cost</th>
@@ -163,6 +168,23 @@
 								{/if}
 							</td>
 							<td class="px-4 py-3">
+								{#if report.refinement_duration_s !== null}
+									<div class="text-zinc-900 dark:text-zinc-100">
+										{formatDuration(report.refinement_duration_s)}
+									</div>
+									<div class="text-xs text-zinc-500 dark:text-zinc-400">
+										{report.boundaries_refined ?? 0}↻ {report.boundaries_snapped ?? 0}⇥ {report.boundaries_kept ?? 0}=
+										{#if report.refinement_model}
+											<span class="text-zinc-400 dark:text-zinc-500">· {report.refinement_model}</span>
+										{/if}
+									</div>
+								{:else if report.status === 'refining'}
+									<span class="text-amber-400">in progress...</span>
+								{:else}
+									<span class="text-zinc-400 dark:text-zinc-600">—</span>
+								{/if}
+							</td>
+							<td class="px-4 py-3">
 								{#if report.ad_breaks_found !== null}
 									<span class="font-medium text-zinc-900 dark:text-zinc-100">{report.ad_breaks_found}</span>
 								{:else}
@@ -170,7 +192,7 @@
 								{/if}
 							</td>
 							<td class="px-4 py-3">
-								{#if report.transcription_input_tokens !== null || report.analysis_input_tokens !== null}
+								{#if report.transcription_input_tokens !== null || report.analysis_input_tokens !== null || report.refinement_input_tokens !== null}
 									<div class="text-xs">
 										{#if report.transcription_input_tokens !== null}
 											<div class="text-zinc-500 dark:text-zinc-400">
@@ -180,6 +202,11 @@
 										{#if report.analysis_input_tokens !== null}
 											<div class="text-zinc-500 dark:text-zinc-400">
 												A: {formatTokens(report.analysis_input_tokens)}&darr; {formatTokens(report.analysis_output_tokens)}&uarr;
+											</div>
+										{/if}
+										{#if report.refinement_input_tokens !== null}
+											<div class="text-zinc-500 dark:text-zinc-400">
+												R: {formatTokens(report.refinement_input_tokens)}&darr; {formatTokens(report.refinement_output_tokens)}&uarr;
 											</div>
 										{/if}
 									</div>
@@ -240,13 +267,16 @@
 							<p class="mt-0.5 text-zinc-700 dark:text-zinc-300">{totalCost(report) > 0 ? formatCost(totalCost(report)) : '—'}</p>
 						</div>
 					</div>
-					{#if report.transcription_duration_s !== null || report.analysis_duration_s !== null}
-						<div class="mt-2 flex gap-3 text-xs text-zinc-500 dark:text-zinc-400">
+					{#if report.transcription_duration_s !== null || report.analysis_duration_s !== null || report.refinement_duration_s !== null}
+						<div class="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-xs text-zinc-500 dark:text-zinc-400">
 							{#if report.transcription_duration_s !== null}
 								<span>Transcription: {formatDuration(report.transcription_duration_s)}</span>
 							{/if}
 							{#if report.analysis_duration_s !== null}
 								<span>Analysis: {formatDuration(report.analysis_duration_s)}</span>
+							{/if}
+							{#if report.refinement_duration_s !== null}
+								<span>Refinement: {formatDuration(report.refinement_duration_s)}</span>
 							{/if}
 						</div>
 					{/if}

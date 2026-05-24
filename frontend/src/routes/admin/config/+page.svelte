@@ -24,6 +24,7 @@
 
 	let transcriptionModelId = $state('');
 	let analysisModelId = $state('');
+	let boundaryRefinementModelId = $state('');
 	let keepRawEpisodes = $state(true);
 	let savingConfig = $state(false);
 	let savingStorageSetting = $state(false);
@@ -40,6 +41,7 @@
 
 	const transcriptionModels = $derived(models.filter((m) => m.supports_transcription));
 	const analysisModels = $derived(models.filter((m) => m.supports_analysis));
+	const refinementModels = $derived(models.filter((m) => m.provider_kind === 'gemini'));
 	const canAddModel = $derived(providers.length > 0);
 
 	async function load() {
@@ -56,6 +58,7 @@
 			podcasts = pods;
 			transcriptionModelId = cfg.transcription_model_id || '';
 			analysisModelId = cfg.analysis_model_id || '';
+			boundaryRefinementModelId = cfg.boundary_refinement_model_id || '';
 			keepRawEpisodes = cfg.keep_raw_episodes;
 		} catch (e: any) {
 			toasts.addToast('error', e.message || 'Failed to load config');
@@ -70,9 +73,11 @@
 			config = await updateConfig({
 				transcription_model_id: transcriptionModelId || null,
 				analysis_model_id: analysisModelId || null,
+				boundary_refinement_model_id: boundaryRefinementModelId || null,
 			});
 			transcriptionModelId = config.transcription_model_id || '';
 			analysisModelId = config.analysis_model_id || '';
+			boundaryRefinementModelId = config.boundary_refinement_model_id || '';
 			toasts.addToast('success', 'Active models saved');
 		} catch (e: any) {
 			toasts.addToast('error', e.message || 'Failed to save');
@@ -130,6 +135,7 @@
 		config = cfg;
 		transcriptionModelId = cfg.transcription_model_id || '';
 		analysisModelId = cfg.analysis_model_id || '';
+		boundaryRefinementModelId = cfg.boundary_refinement_model_id || '';
 		toasts.addToast('success', `Provider "${p.name}" saved`);
 	}
 
@@ -281,6 +287,24 @@
 							<option value={model.id}>{model.display_name}</option>
 						{/each}
 					</select>
+				</div>
+				<div>
+					<label for="refinement-model" class="block text-sm font-medium text-zinc-700 dark:text-zinc-300">
+						Boundary refinement <span class="text-xs font-normal text-zinc-500 dark:text-zinc-400">(optional)</span>
+					</label>
+					<select
+						id="refinement-model"
+						bind:value={boundaryRefinementModelId}
+						class="mt-1 w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm outline-none focus:border-emerald-500 dark:border-zinc-700 dark:bg-zinc-800 dark:text-white"
+					>
+						<option value="">Disabled</option>
+						{#each refinementModels as model (model.id)}
+							<option value={model.id}>{model.display_name}</option>
+						{/each}
+					</select>
+					<p class="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
+						After ad analysis, sends ~20s of audio around each ad boundary to this model for an exact transition timestamp. Reduces ad bleed-through at cuts. Gemini-only — uses a small amount of extra audio tokens per episode.
+					</p>
 				</div>
 
 				<div class="pt-1">

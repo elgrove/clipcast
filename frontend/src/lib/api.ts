@@ -146,6 +146,7 @@ export async function updateConfig(
 	data: Partial<{
 		transcription_model_id: string | null;
 		analysis_model_id: string | null;
+		boundary_refinement_model_id: string | null;
 		keep_raw_episodes: boolean;
 	}>
 ): Promise<Config> {

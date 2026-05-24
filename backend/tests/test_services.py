@@ -262,5 +262,6 @@ def test_queue_ai_chain_tasks(session, monkeypatch):
         "app.tasks.task_download",
         "app.tasks.task_transcribe",
         "app.tasks.task_analyse",
+        "app.tasks.task_refine_boundaries",
         "app.tasks.task_edit",
     ], f"Got: {captured}"
