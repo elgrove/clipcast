@@ -134,9 +134,8 @@ def test_idents_to_ad_breaks_cut_span():
     assert len(breaks) == 1
     br = breaks[0]
     assert br.adverts is None
-    # start = end_of_first = 13.0 s
-    assert br.start_time == "00:00:13.000"
-    # end = end_of_second = 93.0 s
+    # Cut spans start-of-opening-ident to end-of-closing-ident so no jingle audio survives.
+    assert br.start_time == "00:00:10.000"
     assert br.end_time == "00:01:33.000"
 
 
