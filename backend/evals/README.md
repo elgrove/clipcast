@@ -122,7 +122,7 @@ evals/fixtures/<case-id>/
   meta.json             # podcast, episode_title, notes (informational)
   transcription.json    # list[TranscriptionSegment] — needed when use_acast=false
   audio.mp3             # needed when use_acast=true
-  expected.json         # list[CutRegion] — ground truth
+  expected.json         # list of expected regions (per-advert) — ground truth
 ```
 
 `<case-id>` should be a short kebab-case slug like `tifo-2026-01-08`.
@@ -173,9 +173,9 @@ episode under `../_podcasts/<show>/`:
 
 1. The `.mp3.srt` cue list is the transcript — convert each cue to a
    `TranscriptionSegment` and save as `transcription.json`.
-2. The `.mp3.json` ads list is the AI's prediction — convert to
-   `CutRegion`s and hand-edit to correct any errors. Save as
-   `expected.json`.
+2. The `.mp3.json` breaks list is the AI's prediction — flatten the inner
+   `adverts` into per-advert expected entries and hand-edit to correct any
+   errors. Save as `expected.json`.
 3. Copy or symlink the source audio in as `audio.mp3` if the case will be
    evaluated with `use_acast = true`.
 4. Fill in `meta.json`.
@@ -250,5 +250,5 @@ REGISTRY["openai"] = ProviderSpec(
 ```
 
 The factory must return any `AIProviderBase` that implements
-`analyse_adverts`. After registering, models become referenceable as
+`analyse_ad_breaks`. After registering, models become referenceable as
 `openai:<model-name>` in run configs.

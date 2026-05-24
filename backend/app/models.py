@@ -13,18 +13,16 @@ from app.config import settings
 # ── Pydantic schemas (JSON fields, API responses) ───────────────────────────
 
 
-class PodcastEpisodeAdvert(PydanticBaseModel):
+class Advert(PydanticBaseModel):
     start_time: str
     end_time: str
     advert_for: str
-    front_text: str
-    tail_text: str
 
 
-class CutRegion(PydanticBaseModel):
+class AdBreak(PydanticBaseModel):
     start_time: str
     end_time: str
-    label: str
+    adverts: list[Advert] | None = None
 
 
 class TranscriptionSegment(PydanticBaseModel):
@@ -61,7 +59,7 @@ class AnalysisReport(PydanticBaseModel):
     input_tokens: int | None = None
     output_tokens: int | None = None
     cost_usd: float | None = None
-    adverts_found: int | None = None
+    ad_breaks_found: int | None = None
     warnings: str | None = None
     error: str | None = None
 
@@ -75,9 +73,6 @@ class AnalysisReport(PydanticBaseModel):
 
 
 # ── Enums ────────────────────────────────────────────────────────────────────
-
-
-ACAST_ADVERT_LABEL = "Acast ad break"
 
 
 class ClipMode(StrEnum):
@@ -154,9 +149,7 @@ class AIProvider(SQLModel, table=True):
 
 class AIModel(SQLModel, table=True):
     __tablename__ = "ai_models"
-    __table_args__ = (
-        UniqueConstraint("provider_id", "name", name="uq_ai_model_provider_name"),
-    )
+    __table_args__ = (UniqueConstraint("provider_id", "name", name="uq_ai_model_provider_name"),)
 
     id: str = Field(default_factory=new_uuid, primary_key=True)
     created_at: datetime = Field(default_factory=datetime.utcnow)
@@ -184,7 +177,6 @@ class AppConfig(SQLModel, table=True):
     id: str = Field(default="config", primary_key=True)
     transcription_model_id: str | None = Field(default=None, foreign_key="ai_models.id")
     analysis_model_id: str | None = Field(default=None, foreign_key="ai_models.id")
-    identify_ads_in_acast_breaks: bool = Field(default=False)
     keep_raw_episodes: bool = Field(default=True)
 
     transcription_model: AIModel | None = Relationship(
@@ -215,7 +207,6 @@ class PodcastShow(SQLModel, table=True):
     cleanup_keep_days: int | None = Field(default=None)
     cleanup_keep_count: int | None = Field(default=None)
     custom_prompt: str = Field(default="", sa_column=Column(Text))
-    verify_acast_host_read_ads: bool = Field(default=False)
 
     episodes: list["PodcastEpisode"] = Relationship(
         back_populates="podcast",
@@ -252,37 +243,23 @@ class PodcastEpisode(SQLModel, table=True):
     source_audio_url: str = Field(default="", max_length=500)
     stored_filename: str = Field(default="", max_length=500)
     cleaned_at: datetime | None = Field(default=None)
-    ads_json: str = Field(default="[]", sa_column=Column("ads", Text))
-    cut_regions_json: str = Field(default="[]", sa_column=Column("cut_regions", Text))
+    ad_breaks_json: str = Field(default="[]", sa_column=Column("ad_breaks", Text))
     transcription_json: str = Field(default="[]", sa_column=Column("transcription", Text))
 
     podcast: PodcastShow = Relationship(back_populates="episodes")
 
     @property
-    def ads(self) -> list[PodcastEpisodeAdvert]:
+    def ad_breaks(self) -> list[AdBreak]:
         import json
 
-        raw = json.loads(self.ads_json)
-        return [PodcastEpisodeAdvert(**a) for a in raw]
+        raw = json.loads(self.ad_breaks_json)
+        return [AdBreak(**c) for c in raw]
 
-    @ads.setter
-    def ads(self, value: list[PodcastEpisodeAdvert]) -> None:
+    @ad_breaks.setter
+    def ad_breaks(self, value: list[AdBreak]) -> None:
         import json
 
-        self.ads_json = json.dumps([a.model_dump() for a in value])
-
-    @property
-    def cut_regions(self) -> list[CutRegion]:
-        import json
-
-        raw = json.loads(self.cut_regions_json)
-        return [CutRegion(**c) for c in raw]
-
-    @cut_regions.setter
-    def cut_regions(self, value: list[CutRegion]) -> None:
-        import json
-
-        self.cut_regions_json = json.dumps([c.model_dump() for c in value])
+        self.ad_breaks_json = json.dumps([c.model_dump() for c in value])
 
     @property
     def transcription(self) -> list[TranscriptionSegment]:
@@ -324,7 +301,7 @@ class PodcastEpisode(SQLModel, table=True):
         return self.podcast.directory / f"{self._get_base_filename()}.mp3.srt"
 
     @property
-    def ads_path(self) -> Path:
+    def ad_breaks_path(self) -> Path:
         return self.podcast.directory / f"{self._get_base_filename()}.mp3.json"
 
     @property
@@ -445,7 +422,6 @@ class PodcastShowRead(PydanticBaseModel):
     cleanup_keep_days: int | None = None
     cleanup_keep_count: int | None = None
     custom_prompt: str = ""
-    verify_acast_host_read_ads: bool = False
 
 
 class PodcastEpisodeRead(PydanticBaseModel):
@@ -462,7 +438,8 @@ class PodcastEpisodeRead(PydanticBaseModel):
     is_clipped: bool = False
     is_cleaned: bool = False
     has_transcription: bool = False
-    ad_count: int = 0
+    ad_break_count: int = 0
+    ad_break_seconds: int = 0
     clipping_status: str | None = None
 
 
@@ -476,13 +453,11 @@ class PodcastShowUpdate(PydanticBaseModel):
     cleanup_keep_days: int | None = None
     cleanup_keep_count: int | None = None
     custom_prompt: str | None = None
-    verify_acast_host_read_ads: bool | None = None
 
 
 class ConfigRead(PydanticBaseModel):
     transcription_model_id: str | None
     analysis_model_id: str | None
-    identify_ads_in_acast_breaks: bool = False
     keep_raw_episodes: bool = True
     transcription_model: "AIModelRead | None" = None
     analysis_model: "AIModelRead | None" = None
@@ -491,7 +466,6 @@ class ConfigRead(PydanticBaseModel):
 class ConfigUpdate(PydanticBaseModel):
     transcription_model_id: str | None = None
     analysis_model_id: str | None = None
-    identify_ads_in_acast_breaks: bool | None = None
     keep_raw_episodes: bool | None = None
 
 
@@ -587,7 +561,7 @@ class ClippingReportDetail(PydanticBaseModel):
     analysis_input_tokens: int | None = None
     analysis_output_tokens: int | None = None
     analysis_cost: float | None = None
-    adverts_found: int | None = None
+    ad_breaks_found: int | None = None
     has_exceptions: bool = False
 
 

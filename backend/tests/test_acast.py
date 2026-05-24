@@ -2,7 +2,6 @@ import numpy as np
 import pytest
 from pydub import AudioSegment
 
-from app.models import ACAST_ADVERT_LABEL
 from app.services.acast import (
     IDENT_PATH,
     MAX_PAIR_GAP_S,
@@ -10,7 +9,7 @@ from app.services.acast import (
     SAMPLE_RATE,
     acast_feed_url_heuristic,
     detect_idents,
-    idents_to_cut_regions,
+    idents_to_ad_breaks,
     pair_idents,
 )
 
@@ -125,34 +124,34 @@ def test_pair_idents_end_of_file_with_exact_duration():
     assert unpaired == 0
 
 
-# ── idents_to_cut_regions ────────────────────────────────────────────────────
+# ── idents_to_ad_breaks ──────────────────────────────────────────────────────
 
 
-def test_idents_to_cut_regions_cut_span():
+def test_idents_to_ad_breaks_cut_span():
     first = (10.0, 13.0)
     second = (90.0, 93.0)
-    regions = idents_to_cut_regions([(first, second)])
-    assert len(regions) == 1
-    region = regions[0]
-    assert region.label == ACAST_ADVERT_LABEL
+    breaks = idents_to_ad_breaks([(first, second)])
+    assert len(breaks) == 1
+    br = breaks[0]
+    assert br.adverts is None
     # start = end_of_first = 13.0 s
-    assert region.start_time == "00:00:13.000"
+    assert br.start_time == "00:00:13.000"
     # end = end_of_second = 93.0 s
-    assert region.end_time == "00:01:33.000"
+    assert br.end_time == "00:01:33.000"
 
 
-def test_idents_to_cut_regions_empty():
-    assert idents_to_cut_regions([]) == []
+def test_idents_to_ad_breaks_empty():
+    assert idents_to_ad_breaks([]) == []
 
 
-def test_idents_to_cut_regions_multiple():
+def test_idents_to_ad_breaks_multiple():
     pairs = [
         ((10.0, 13.0), (90.0, 93.0)),
         ((200.0, 203.0), (350.0, 353.0)),
     ]
-    regions = idents_to_cut_regions(pairs)
-    assert len(regions) == 2
-    assert all(r.label == ACAST_ADVERT_LABEL for r in regions)
+    breaks = idents_to_ad_breaks(pairs)
+    assert len(breaks) == 2
+    assert all(b.adverts is None for b in breaks)
 
 
 # ── synthetic-audio integration ───────────────────────────────────────────────

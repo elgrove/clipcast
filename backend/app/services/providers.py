@@ -13,16 +13,17 @@ from openai import OpenAI
 from pydantic import BaseModel as PydanticBaseModel
 
 from app.models import (
+    AdBreak,
+    Advert,
     AIModel,
     AIProvider,
     AnalysisReport,
     AppConfig,
-    PodcastEpisodeAdvert,
     Provider,
     TranscriptionReport,
     TranscriptionSegment,
 )
-from app.services.prompts import ANALYSE_ADVERTS_PROMPT, TRANSCRIBE_AUDIO_PROMPT
+from app.services.prompts import ANALYSE_AD_BREAKS_PROMPT, TRANSCRIBE_AUDIO_PROMPT
 
 logger = logging.getLogger(__name__)
 
@@ -34,8 +35,39 @@ class Transcription(PydanticBaseModel):
     segments: list[TranscriptionSegment] = []
 
 
-class PodcastEpisodeAdverts(PydanticBaseModel):
-    adverts: list[PodcastEpisodeAdvert] = []
+class _AdvertOut(PydanticBaseModel):
+    start_time: str
+    end_time: str
+    advert_for: str
+
+
+class _AdBreakOut(PydanticBaseModel):
+    start_time: str
+    end_time: str
+    adverts: list[_AdvertOut]
+
+
+class AdBreaksResponse(PydanticBaseModel):
+    """Structured-output schema sent to the model. Kept separate from the
+    storage ``AdBreak`` so the model is forced to return per-advert detail
+    (which anchors its reasoning to the transcript) even though the rest of
+    the system only stores breaks."""
+
+    breaks: list[_AdBreakOut] = []
+
+
+def _response_to_ad_breaks(response: AdBreaksResponse) -> list[AdBreak]:
+    return [
+        AdBreak(
+            start_time=b.start_time,
+            end_time=b.end_time,
+            adverts=[
+                Advert(start_time=a.start_time, end_time=a.end_time, advert_for=a.advert_for)
+                for a in b.adverts
+            ],
+        )
+        for b in response.breaks
+    ]
 
 
 def _format_chunk_range(chunk_range: tuple[float, float]) -> str:
@@ -57,13 +89,13 @@ class AIProviderBase(ABC):
         pass
 
     @abstractmethod
-    def analyse_adverts(
+    def analyse_ad_breaks(
         self,
         transcription: Transcription,
         report: AnalysisReport = None,
         custom_instructions: str | None = None,
         chunk_range: tuple[float, float] | None = None,
-    ) -> PodcastEpisodeAdverts:
+    ) -> list[AdBreak]:
         pass
 
     def calculate_cost(self, input_tokens, output_tokens, model_config: AIModel):
@@ -133,14 +165,14 @@ class GeminiProvider(AIProviderBase):
         ]
         return Transcription(segments=segments)
 
-    def analyse_adverts(
+    def analyse_ad_breaks(
         self,
         transcription: Transcription,
         report: AnalysisReport = None,
         custom_instructions: str | None = None,
         chunk_range: tuple[float, float] | None = None,
-    ) -> PodcastEpisodeAdverts:
-        logger.info("Analysing adverts with Gemini model %s", self.model_config.name)
+    ) -> list[AdBreak]:
+        logger.info("Analysing ad breaks with Gemini model %s", self.model_config.name)
 
         client = genai.Client(
             api_key=self.api_key,
@@ -148,7 +180,7 @@ class GeminiProvider(AIProviderBase):
         )
 
         transcript_json = json.dumps(transcription.model_dump(), indent=2)
-        prompt = ANALYSE_ADVERTS_PROMPT.format(transcript=transcript_json)
+        prompt = ANALYSE_AD_BREAKS_PROMPT.format(transcript=transcript_json)
         if chunk_range is not None:
             prompt += _format_chunk_range(chunk_range)
         if custom_instructions:
@@ -159,7 +191,7 @@ class GeminiProvider(AIProviderBase):
             contents=[prompt],
             config=types.GenerateContentConfig(
                 response_mime_type="application/json",
-                response_schema=PodcastEpisodeAdverts,
+                response_schema=AdBreaksResponse,
             ),
         )
 
@@ -172,7 +204,8 @@ class GeminiProvider(AIProviderBase):
             report.cost_usd = self.calculate_cost(input_tokens, output_tokens, self.model_config)
 
         text = self._strip_code_fences(response.text)
-        return PodcastEpisodeAdverts.model_validate(json.loads(text))
+        parsed = AdBreaksResponse.model_validate(json.loads(text))
+        return _response_to_ad_breaks(parsed)
 
 
 class WhisperProvider(AIProviderBase):
@@ -217,13 +250,13 @@ class WhisperProvider(AIProviderBase):
         ]
         return Transcription(segments=segments)
 
-    def analyse_adverts(
+    def analyse_ad_breaks(
         self,
         transcription: Transcription,
         report: AnalysisReport = None,
         custom_instructions: str | None = None,
         chunk_range: tuple[float, float] | None = None,
-    ) -> PodcastEpisodeAdverts:
+    ) -> list[AdBreak]:
         raise NotImplementedError("WhisperProvider only supports transcription, not analysis")
 
 
@@ -272,21 +305,21 @@ class OpenAICompatibleProvider(AIProviderBase):
         ]
         return Transcription(segments=segments)
 
-    def analyse_adverts(
+    def analyse_ad_breaks(
         self,
         transcription: Transcription,
         report: AnalysisReport = None,
         custom_instructions: str | None = None,
         chunk_range: tuple[float, float] | None = None,
-    ) -> PodcastEpisodeAdverts:
+    ) -> list[AdBreak]:
         logger.info(
-            "Analysing adverts with %s model %s",
+            "Analysing ad breaks with %s model %s",
             type(self).__name__,
             self.model_config.name,
         )
 
         transcript_json = json.dumps(transcription.model_dump(), indent=2)
-        prompt = ANALYSE_ADVERTS_PROMPT.format(transcript=transcript_json)
+        prompt = ANALYSE_AD_BREAKS_PROMPT.format(transcript=transcript_json)
         if chunk_range is not None:
             prompt += _format_chunk_range(chunk_range)
         if custom_instructions:
@@ -295,7 +328,7 @@ class OpenAICompatibleProvider(AIProviderBase):
         completion = self._client().beta.chat.completions.parse(
             model=self.model_config.name,
             messages=[{"role": "user", "content": prompt}],
-            response_format=PodcastEpisodeAdverts,
+            response_format=AdBreaksResponse,
             extra_headers=self.default_headers or None,
             timeout=ANALYSIS_TIMEOUT,
             **self._extra_request_kwargs(),
@@ -317,8 +350,8 @@ class OpenAICompatibleProvider(AIProviderBase):
         parsed = completion.choices[0].message.parsed
         if parsed is None:
             content = completion.choices[0].message.content or ""
-            return PodcastEpisodeAdverts.model_validate_json(content)
-        return parsed
+            parsed = AdBreaksResponse.model_validate_json(content)
+        return _response_to_ad_breaks(parsed)
 
     # ── override points ─────────────────────────────────────────────────────────
 

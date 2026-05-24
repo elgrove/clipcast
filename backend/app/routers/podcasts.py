@@ -37,7 +37,6 @@ def _podcast_to_read(podcast: PodcastShow, episode_count: int = 0) -> PodcastSho
         cleanup_keep_days=podcast.cleanup_keep_days,
         cleanup_keep_count=podcast.cleanup_keep_count,
         custom_prompt=podcast.custom_prompt,
-        verify_acast_host_read_ads=podcast.verify_acast_host_read_ads,
     )
 
 
@@ -130,8 +129,6 @@ def update_podcast(
         )
     if data.custom_prompt is not None:
         podcast.custom_prompt = data.custom_prompt
-    if data.verify_acast_host_read_ads is not None:
-        podcast.verify_acast_host_read_ads = data.verify_acast_host_read_ads
     session.add(podcast)
     session.commit()
     session.refresh(podcast)

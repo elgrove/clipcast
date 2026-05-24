@@ -6,7 +6,7 @@ from pathlib import Path
 
 from pydub import AudioSegment
 
-from app.models import CutRegion, PodcastEpisode
+from app.models import AdBreak, PodcastEpisode
 
 logger = logging.getLogger(__name__)
 
@@ -32,15 +32,15 @@ def format_ms_to_time(ms: int) -> str:
     return f"{h:02d}:{m:02d}:{s:06.3f}"
 
 
-def clipped_ms_to_raw_ms(clip_ms: int, removed_regions: list[CutRegion]) -> int:
+def clipped_ms_to_raw_ms(clip_ms: int, removed_breaks: list[AdBreak]) -> int:
     """Convert a position in clipped audio back to the corresponding position
     in raw audio. Walks already-removed cuts (in raw time order) and shifts
     forward by each cut's duration when the converted point would lie past it."""
-    sorted_regions = sorted(removed_regions, key=lambda r: parse_time_to_ms(r.start_time))
+    sorted_breaks = sorted(removed_breaks, key=lambda b: parse_time_to_ms(b.start_time))
     raw_ms = clip_ms
-    for region in sorted_regions:
-        start = parse_time_to_ms(region.start_time)
-        end = parse_time_to_ms(region.end_time)
+    for br in sorted_breaks:
+        start = parse_time_to_ms(br.start_time)
+        end = parse_time_to_ms(br.end_time)
         if end <= start:
             continue
         if start <= raw_ms:
@@ -52,12 +52,12 @@ def clipped_ms_to_raw_ms(clip_ms: int, removed_regions: list[CutRegion]) -> int:
 
 def apply_cuts_inplace(
     source_path: Path,
-    regions: list[CutRegion],
+    breaks: list[AdBreak],
     output_path: Path | None = None,
     label: str = "",
 ) -> int:
     """Apply cuts from `source_path` and write the result to `output_path`
-    (defaults to `source_path`). Returns the number of cuts applied. Regions
+    (defaults to `source_path`). Returns the number of cuts applied. Breaks
     with `end <= start` are skipped."""
     target = output_path or source_path
     # Open via file handle: pydub treats any .raw filename suffix as raw PCM
@@ -67,15 +67,15 @@ def apply_cuts_inplace(
         audio = AudioSegment.from_file(fh, format="mp3")
 
     segments = []
-    for region in regions:
-        start_ms = parse_time_to_ms(region.start_time)
-        end_ms = parse_time_to_ms(region.end_time)
+    for br in breaks:
+        start_ms = parse_time_to_ms(br.start_time)
+        end_ms = parse_time_to_ms(br.end_time)
         if end_ms <= start_ms:
             logger.warning(
-                "Skipping invalid cut region%s: start=%s end=%s",
+                "Skipping invalid ad break%s: start=%s end=%s",
                 f" for {label}" if label else "",
-                region.start_time,
-                region.end_time,
+                br.start_time,
+                br.end_time,
             )
             continue
         segments.append((start_ms, end_ms))
@@ -102,13 +102,11 @@ def apply_cuts_inplace(
     return len(segments)
 
 
-def edit_episode(
-    episode: PodcastEpisode, *, keep_raw: bool = True, force: bool = False
-) -> None:
+def edit_episode(episode: PodcastEpisode, *, keep_raw: bool = True, force: bool = False) -> None:
     if not episode.mp3_path.exists():
         raise ValueError(f"Episode {episode.title} has no downloaded MP3")
 
-    if not episode.cut_regions:
+    if not episode.ad_breaks:
         return
 
     if episode.raw_path.exists() and not force:
@@ -124,7 +122,7 @@ def edit_episode(
         try:
             shutil.copy(episode.mp3_path, temp_path)
 
-            cuts = apply_cuts_inplace(episode.mp3_path, episode.cut_regions, label=episode.title)
+            cuts = apply_cuts_inplace(episode.mp3_path, episode.ad_breaks, label=episode.title)
             if cuts == 0:
                 return
 
@@ -135,18 +133,7 @@ def edit_episode(
             if temp_path.exists():
                 temp_path.unlink()
     else:
-        cuts = apply_cuts_inplace(episode.mp3_path, episode.cut_regions, label=episode.title)
+        cuts = apply_cuts_inplace(episode.mp3_path, episode.ad_breaks, label=episode.title)
         if cuts == 0:
             return
         logger.info("Edited episode (no raw backup), removed %d segments", cuts)
-
-
-def re_edit_from_raw(episode: PodcastEpisode) -> int:
-    """Re-apply cuts using episode.cut_regions, starting from the preserved raw_path.
-    Intended for when regions change after the initial edit (e.g. AI verification
-    of an Acast-clipped episode adds host-read ads). Returns the cut count."""
-    if not episode.raw_path.exists():
-        raise ValueError(f"Raw audio not found for episode {episode.title}")
-    return apply_cuts_inplace(
-        episode.raw_path, episode.cut_regions, output_path=episode.mp3_path, label=episode.title
-    )

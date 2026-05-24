@@ -1,4 +1,3 @@
-import json
 import logging
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -21,8 +20,14 @@ router = APIRouter(tags=["episodes"])
 
 
 def _episode_to_read(episode: PodcastEpisode, session: Session) -> PodcastEpisodeRead:
-    ads = json.loads(episode.ads_json) if episode.ads_json != "[]" else []
+    from app.services.editor import parse_time_to_ms
+
+    breaks = episode.ad_breaks
     has_transcription = episode.transcription_json != "[]"
+    ad_break_seconds = sum(
+        max(parse_time_to_ms(b.end_time) - parse_time_to_ms(b.start_time), 0) // 1000
+        for b in breaks
+    )
 
     latest_report = session.exec(
         select(ClippingReport)
@@ -49,7 +54,8 @@ def _episode_to_read(episode: PodcastEpisode, session: Session) -> PodcastEpisod
         is_clipped=is_clipped,
         is_cleaned=episode.is_cleaned,
         has_transcription=has_transcription,
-        ad_count=len(ads),
+        ad_break_count=len(breaks),
+        ad_break_seconds=ad_break_seconds,
         clipping_status=latest_report.status.value if latest_report else None,
     )
 

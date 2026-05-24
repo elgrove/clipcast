@@ -7,13 +7,11 @@ from pathlib import Path
 from typing import Any
 
 from app.models import (
-    ACAST_ADVERT_LABEL,
+    AdBreak,
     AnalysisReport,
-    CutRegion,
-    PodcastEpisodeAdvert,
     TranscriptionSegment,
 )
-from app.services.acast import detect_idents, idents_to_cut_regions, pair_idents
+from app.services.acast import detect_idents, idents_to_ad_breaks, pair_idents
 from app.services.analysis import analyse_transcription
 
 from .metrics import (
@@ -26,6 +24,7 @@ from .metrics import (
 )
 from .providers import ModelSpec, build_provider
 
+ACAST_BREAK_LABEL = "Acast ad break"
 FIXTURES_DIR = Path(__file__).parent / "fixtures"
 AUDIO_CANDIDATES = ("audio.mp3", "audio.wav", "audio.m4a", "audio.ogg")
 
@@ -123,31 +122,47 @@ def load_case(case_id: str) -> EvalCase:
     )
 
 
-# ── Cut-region conversion ────────────────────────────────────────────────────
+# ── Interval conversion ──────────────────────────────────────────────────────
 
 
-def _ad_to_cut_region(ad: PodcastEpisodeAdvert) -> CutRegion:
-    return CutRegion(
-        start_time=str(ad.start_time),
-        end_time=str(ad.end_time),
-        label=ad.advert_for or "Ad",
-    )
+def _breaks_to_ad_intervals(breaks: list[AdBreak]) -> list[Interval]:
+    """Flatten breaks to individual advert intervals for ad-level scoring.
+
+    For AI-produced breaks, each inner advert becomes one interval. For
+    breaks without per-advert detail (Acast), the whole break is treated as
+    one ad-level interval so the metrics still have something to compare."""
+    intervals: list[Interval] = []
+    for br in breaks:
+        if br.adverts:
+            for ad in br.adverts:
+                intervals.append(
+                    Interval(
+                        start=parse_time(ad.start_time),
+                        end=parse_time(ad.end_time),
+                        label=ad.advert_for or "Ad",
+                    )
+                )
+        else:
+            intervals.append(
+                Interval(
+                    start=parse_time(br.start_time),
+                    end=parse_time(br.end_time),
+                    label=ACAST_BREAK_LABEL,
+                )
+            )
+    return intervals
 
 
-def _region_to_interval(region: CutRegion) -> Interval:
+def _break_to_interval(br: AdBreak) -> Interval:
+    if br.adverts:
+        label = "; ".join(ad.advert_for for ad in br.adverts if ad.advert_for) or "Ad break"
+    else:
+        label = ACAST_BREAK_LABEL
     return Interval(
-        start=parse_time(region.start_time),
-        end=parse_time(region.end_time),
-        label=region.label,
+        start=parse_time(br.start_time),
+        end=parse_time(br.end_time),
+        label=label,
     )
-
-
-def _region_to_dict(region: CutRegion) -> dict[str, Any]:
-    return {
-        "start_time": parse_time(region.start_time),
-        "end_time": parse_time(region.end_time),
-        "label": region.label,
-    }
 
 
 # ── Pipeline ─────────────────────────────────────────────────────────────────
@@ -212,18 +227,18 @@ class PipelineResult:
     error: str | None = None
 
 
-def _produce_cut_regions(
+def _produce_ad_breaks(
     case: EvalCase,
     use_acast: bool,
     model: ModelSpec | None,
     custom_prompt: str | None,
     result: PipelineResult,
-) -> list[CutRegion]:
+) -> list[AdBreak]:
     """Reproduce the clipping pipeline for one case.
 
-    Mirrors tasks.py: when use_acast is true the cuts are the Acast bracket
-    spans only (the AI analysis-inside-brackets step is reporting-only and is
-    not included). Otherwise the cuts are AI-detected ads."""
+    When use_acast is true the breaks come from ident detection (no inner
+    advert detail). Otherwise the breaks come from AI analysis (with inner
+    adverts populated)."""
     if use_acast:
         audio_path = case.require_audio()
         idents, audio_duration = detect_idents(audio_path)
@@ -231,7 +246,7 @@ def _produce_cut_regions(
         result.audio_duration_s = audio_duration
         result.raw_ident_count = len(idents)
         result.unpaired_idents = unpaired
-        return idents_to_cut_regions(pairs)
+        return idents_to_ad_breaks(pairs)
 
     if model is None:
         raise ValueError("A model is required when use_acast=false")
@@ -239,7 +254,7 @@ def _produce_cut_regions(
     transcription = case.load_transcription()
     provider = build_provider(model)
     report = AnalysisReport(provider=model.provider, model_name=model.model)
-    ads = analyse_transcription(
+    breaks = analyse_transcription(
         transcription,
         provider=provider,
         report=report,
@@ -248,7 +263,7 @@ def _produce_cut_regions(
     result.cost_usd = report.cost_usd
     result.input_tokens = report.input_tokens
     result.output_tokens = report.output_tokens
-    return [_ad_to_cut_region(ad) for ad in ads]
+    return breaks
 
 
 def _interval_to_dict(iv: Interval) -> dict[str, Any]:
@@ -269,11 +284,11 @@ def _expected_to_dict(e: ExpectedRegion) -> dict[str, Any]:
     }
 
 
-def _predicted_to_dict(region: CutRegion) -> dict[str, Any]:
+def _interval_dict(iv: Interval) -> dict[str, Any]:
     return {
-        "start_time": parse_time(region.start_time),
-        "end_time": parse_time(region.end_time),
-        "label": region.label,
+        "start_time": iv.start,
+        "end_time": iv.end,
+        "label": iv.label,
     }
 
 
@@ -365,21 +380,14 @@ def run_case(
 
     started = time.monotonic()
     try:
-        predicted_regions = _produce_cut_regions(case, use_acast, model, custom_prompt, result)
+        predicted_breaks = _produce_ad_breaks(case, use_acast, model, custom_prompt, result)
     except Exception as exc:
         result.error = f"{type(exc).__name__}: {exc}"
         result.duration_seconds = time.monotonic() - started
         return result
     result.duration_seconds = time.monotonic() - started
 
-    pred_intervals = [
-        Interval(
-            start=parse_time(r.start_time),
-            end=parse_time(r.end_time),
-            label=r.label,
-        )
-        for r in predicted_regions
-    ]
+    pred_intervals = _breaks_to_ad_intervals(predicted_breaks)
     exp_intervals = [
         Interval(
             start=e.start_time,
@@ -413,7 +421,7 @@ def run_case(
             )
         )
 
-    result.predicted = [_predicted_to_dict(r) for r in predicted_regions]
+    result.predicted = [_interval_dict(iv) for iv in pred_intervals]
     result.matched = len(scores.matched_required)
     result.expected_required_count = scores.required_expected_count
     result.expected_optional_count = scores.optional_expected_count
@@ -422,11 +430,11 @@ def run_case(
     result.f1 = scores.f1
     result.duration_precision = durations.precision
     result.duration_coverage = durations.coverage
-    result.false_positives = [_predicted_to_dict(predicted_regions[i]) for i in scores.fp_indices]
+    result.false_positives = [_interval_dict(pred_intervals[i]) for i in scores.fp_indices]
     result.false_negatives = [_expected_to_dict(case.expected[i]) for i in scores.fn_indices]
     # Absorbed: predictions that matched an optional expected
     absorbed_pred_indices = [match.matches[i].predicted_index for i in scores.matched_optional]
-    result.absorbed = [_predicted_to_dict(predicted_regions[i]) for i in absorbed_pred_indices]
+    result.absorbed = [_interval_dict(pred_intervals[i]) for i in absorbed_pred_indices]
     result.unmatched_optional = [
         _expected_to_dict(case.expected[i]) for i in scores.unmatched_optional_indices
     ]
@@ -435,8 +443,9 @@ def run_case(
         sum(n.similarity for n in name_scores) / len(name_scores) if name_scores else 0.0
     )
 
-    # ── Break-level: touching ads clustered into ad breaks ───────────────────
-    pred_breaks = cluster_regions(pred_intervals, break_cluster_gap_s)
+    # ── Break-level: the model returns breaks directly; expected ground truth
+    # is still per-advert so we cluster it to get break-equivalent boundaries.
+    pred_breaks = [_break_to_interval(br) for br in predicted_breaks]
     exp_breaks = cluster_regions(exp_intervals, break_cluster_gap_s)
 
     break_match = match_intervals(pred_breaks, exp_breaks, iou_threshold=iou_threshold)
@@ -479,7 +488,7 @@ def result_to_dict(result: PipelineResult) -> dict[str, Any]:
 
 # Re-export so callers can use a stable label constant
 __all__ = [
-    "ACAST_ADVERT_LABEL",
+    "ACAST_BREAK_LABEL",
     "EvalCase",
     "PipelineResult",
     "list_cases",

@@ -90,7 +90,7 @@ def list_reports(
                 analysis_input_tokens=ar.get("input_tokens") if ar else None,
                 analysis_output_tokens=ar.get("output_tokens") if ar else None,
                 analysis_cost=ar.get("cost_usd") if ar else None,
-                adverts_found=ar.get("adverts_found") if ar else None,
+                ad_breaks_found=ar.get("ad_breaks_found") if ar else None,
                 has_exceptions=report.exceptions_json != "[]",
             )
         )

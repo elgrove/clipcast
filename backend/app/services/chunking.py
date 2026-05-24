@@ -15,7 +15,7 @@ import json
 import logging
 from dataclasses import dataclass, field
 
-from app.models import PodcastEpisodeAdvert, TranscriptionSegment
+from app.models import AdBreak, Advert, TranscriptionSegment
 from app.services.editor import parse_time_to_ms
 
 logger = logging.getLogger(__name__)
@@ -24,7 +24,7 @@ DURATION_THRESHOLD_S = 7200.0  # 2h — below this we always single-call
 CONTEXT_SAFETY_FACTOR = 0.6  # of the model's context window, in tokens
 CHARS_PER_TOKEN = 4  # tiktoken-free heuristic
 DEFAULT_OVERLAP_S = 300.0  # 5 minutes either side of each chunk's primary range
-ADVERT_IOU_DEDUP_THRESHOLD = 0.5
+AD_BREAK_IOU_DEDUP_THRESHOLD = 0.5
 
 
 @dataclass
@@ -32,10 +32,10 @@ class Chunk:
     """One window of a chunked analysis call.
 
     ``primary_start``/``primary_end`` describe the section this chunk is
-    responsible for — adverts found outside this range are considered to belong
+    responsible for — breaks found outside this range are considered to belong
     to neighbouring chunks and are dropped during merge. The ``segments`` list
     includes the primary range plus overlap on each side so the model has
-    enough context to identify ads that straddle the boundary."""
+    enough context to identify breaks that straddle the boundary."""
 
     primary_start: float
     primary_end: float
@@ -43,7 +43,7 @@ class Chunk:
 
 
 def _segments_to_prompt_json(segments: list[TranscriptionSegment]) -> str:
-    """Mirror what providers.analyse_adverts pastes into the prompt."""
+    """Mirror what providers.analyse_ad_breaks pastes into the prompt."""
     payload = {"segments": [s.model_dump() for s in segments]}
     return json.dumps(payload, indent=2)
 
@@ -86,9 +86,7 @@ def chunk_segments(
     # would serialise it. The array nesting adds 4 leading spaces per line which
     # otherwise adds up to a ~10% undercount on long episodes.
     scaffold_cost = len(_segments_to_prompt_json([]))
-    segment_costs = [
-        len(_segments_to_prompt_json([s])) - scaffold_cost for s in segments
-    ]
+    segment_costs = [len(_segments_to_prompt_json([s])) - scaffold_cost for s in segments]
 
     target_chars = _target_chars_for_chunk(context_window)
     if target_chars <= scaffold_cost:
@@ -127,7 +125,9 @@ def chunk_segments(
         while lo > 0 and segments[lo - 1].end_time > primary_start - overlap_seconds:
             lo -= 1
         hi = last_idx
-        while hi < len(segments) - 1 and segments[hi + 1].start_time < primary_end + overlap_seconds:
+        while (
+            hi < len(segments) - 1 and segments[hi + 1].start_time < primary_end + overlap_seconds
+        ):
             hi += 1
         chunks.append(
             Chunk(
@@ -139,8 +139,8 @@ def chunk_segments(
     return chunks
 
 
-def _advert_seconds(advert: PodcastEpisodeAdvert) -> tuple[float, float]:
-    return parse_time_to_ms(advert.start_time) / 1000.0, parse_time_to_ms(advert.end_time) / 1000.0
+def _break_seconds(b: AdBreak) -> tuple[float, float]:
+    return parse_time_to_ms(b.start_time) / 1000.0, parse_time_to_ms(b.end_time) / 1000.0
 
 
 def _iou(a: tuple[float, float], b: tuple[float, float]) -> float:
@@ -149,39 +149,56 @@ def _iou(a: tuple[float, float], b: tuple[float, float]) -> float:
     return inter / union if union > 0 else 0.0
 
 
-def merge_adverts(
-    advert_lists: list[list[PodcastEpisodeAdvert]],
-    iou_threshold: float = ADVERT_IOU_DEDUP_THRESHOLD,
-) -> list[PodcastEpisodeAdvert]:
-    """Combine adverts from multiple chunks, dropping near-duplicates that the
-    overlap windows produce. Two adverts whose time intervals have IoU above
-    ``iou_threshold`` are treated as the same ad; the longer one wins (it tends
-    to have the cleaner boundaries since both chunks fully contained it)."""
-    flat: list[PodcastEpisodeAdvert] = [a for lst in advert_lists for a in lst]
+def _union_adverts(a: list[Advert] | None, b: list[Advert] | None) -> list[Advert] | None:
+    """Combine inner adverts from two near-duplicate breaks. Deduped by
+    (start_time, end_time, advert_for) and sorted by start time."""
+    if a is None and b is None:
+        return None
+    seen: dict[tuple[str, str, str], Advert] = {}
+    for ad in (a or []) + (b or []):
+        seen.setdefault((ad.start_time, ad.end_time, ad.advert_for), ad)
+    return sorted(seen.values(), key=lambda ad: parse_time_to_ms(ad.start_time))
+
+
+def merge_ad_breaks(
+    break_lists: list[list[AdBreak]],
+    iou_threshold: float = AD_BREAK_IOU_DEDUP_THRESHOLD,
+) -> list[AdBreak]:
+    """Combine ad breaks from multiple chunks, dropping near-duplicates that
+    the overlap windows produce. Two breaks whose time intervals have IoU above
+    ``iou_threshold`` are treated as the same break; the longer one wins (it
+    tends to have the cleaner boundaries since both chunks fully contained it).
+    The survivor's ``adverts`` list is the union of both candidates."""
+    flat: list[AdBreak] = [b for lst in break_lists for b in lst]
     if not flat:
         return []
 
     # Sort by start time so the kept list ends up in episode order.
-    flat.sort(key=lambda a: _advert_seconds(a)[0])
+    flat.sort(key=lambda b: _break_seconds(b)[0])
 
-    kept: list[PodcastEpisodeAdvert] = []
+    kept: list[AdBreak] = []
     kept_spans: list[tuple[float, float]] = []
-    for ad in flat:
-        span = _advert_seconds(ad)
+    for br in flat:
+        span = _break_seconds(br)
         duplicate_idx: int | None = None
         for i, existing in enumerate(kept_spans):
             if _iou(span, existing) >= iou_threshold:
                 duplicate_idx = i
                 break
         if duplicate_idx is None:
-            kept.append(ad)
+            kept.append(br)
             kept_spans.append(span)
             continue
-        # Prefer the longer-spanning advert as the canonical version.
+        # Prefer the longer-spanning break as the canonical version, but always
+        # union the inner adverts so we don't lose any.
+        existing = kept[duplicate_idx]
         existing_duration = kept_spans[duplicate_idx][1] - kept_spans[duplicate_idx][0]
         new_duration = span[1] - span[0]
+        merged_adverts = _union_adverts(existing.adverts, br.adverts)
         if new_duration > existing_duration:
-            kept[duplicate_idx] = ad
+            kept[duplicate_idx] = br.model_copy(update={"adverts": merged_adverts})
             kept_spans[duplicate_idx] = span
+        else:
+            kept[duplicate_idx] = existing.model_copy(update={"adverts": merged_adverts})
 
     return kept

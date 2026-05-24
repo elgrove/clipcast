@@ -1,30 +1,28 @@
 import logging
 
-from app.models import AnalysisReport, PodcastEpisodeAdvert, TranscriptionSegment
-from app.services.chunking import Chunk, chunk_segments, merge_adverts, should_chunk
+from app.models import AdBreak, AnalysisReport, TranscriptionSegment
+from app.services.chunking import Chunk, chunk_segments, merge_ad_breaks, should_chunk
 from app.services.editor import parse_time_to_ms
 from app.services.providers import AIProviderBase, Transcription
 
 logger = logging.getLogger(__name__)
 
 
-def _advert_centre_seconds(advert: PodcastEpisodeAdvert) -> float:
-    start_ms = parse_time_to_ms(advert.start_time)
-    end_ms = parse_time_to_ms(advert.end_time)
+def _break_centre_seconds(b: AdBreak) -> float:
+    start_ms = parse_time_to_ms(b.start_time)
+    end_ms = parse_time_to_ms(b.end_time)
     return (start_ms + end_ms) / 2000.0
 
 
-def _filter_to_primary(
-    adverts: list[PodcastEpisodeAdvert], chunk: Chunk
-) -> list[PodcastEpisodeAdvert]:
-    """Drop adverts whose centre lies outside this chunk's primary range — the
+def _filter_to_primary(breaks: list[AdBreak], chunk: Chunk) -> list[AdBreak]:
+    """Drop breaks whose centre lies outside this chunk's primary range — the
     neighbouring chunk that owns that range will return them. Centre rather
-    than start avoids losing ads that begin just before a boundary."""
-    kept: list[PodcastEpisodeAdvert] = []
-    for ad in adverts:
-        centre = _advert_centre_seconds(ad)
+    than start avoids losing breaks that begin just before a boundary."""
+    kept: list[AdBreak] = []
+    for br in breaks:
+        centre = _break_centre_seconds(br)
         if chunk.primary_start <= centre <= chunk.primary_end:
-            kept.append(ad)
+            kept.append(br)
     return kept
 
 
@@ -33,30 +31,30 @@ def analyse_transcription(
     provider: AIProviderBase,
     report: AnalysisReport,
     custom_instructions: str | None = None,
-) -> list[PodcastEpisodeAdvert]:
+) -> list[AdBreak]:
     context_window = getattr(provider.model_config, "context_window", 0)
 
     if not should_chunk(segments, context_window):
-        logger.info("Analysing adverts (single call)")
-        adverts_response = provider.analyse_adverts(
+        logger.info("Analysing ad breaks (single call)")
+        breaks = provider.analyse_ad_breaks(
             Transcription(segments=segments),
             report=report,
             custom_instructions=custom_instructions,
         )
-        report.adverts_found = len(adverts_response.adverts)
-        logger.info("Analysis complete: %d adverts found", report.adverts_found)
-        return adverts_response.adverts
+        report.ad_breaks_found = len(breaks)
+        logger.info("Analysis complete: %d ad breaks found", report.ad_breaks_found)
+        return breaks
 
     chunks = chunk_segments(segments, context_window)
     duration_h = segments[-1].end_time / 3600.0
     logger.info(
-        "Analysing adverts in %d chunks (episode %.1fh, model ctx %d tokens)",
+        "Analysing ad breaks in %d chunks (episode %.1fh, model ctx %d tokens)",
         len(chunks),
         duration_h,
         context_window,
     )
 
-    per_chunk: list[list[PodcastEpisodeAdvert]] = []
+    per_chunk: list[list[AdBreak]] = []
     total_input = 0
     total_output = 0
     total_cost = 0.0
@@ -65,35 +63,35 @@ def analyse_transcription(
             provider=report.provider,
             model_name=report.model_name,
         )
-        response = provider.analyse_adverts(
+        breaks = provider.analyse_ad_breaks(
             Transcription(segments=chunk.segments),
             report=sub_report,
             custom_instructions=custom_instructions,
             chunk_range=(chunk.primary_start, chunk.primary_end),
         )
-        filtered = _filter_to_primary(response.adverts, chunk)
+        filtered = _filter_to_primary(breaks, chunk)
         per_chunk.append(filtered)
         total_input += sub_report.input_tokens or 0
         total_output += sub_report.output_tokens or 0
         total_cost += sub_report.cost_usd or 0.0
         logger.info(
-            "Chunk %d/%d (%.0f-%.0fs): %d adverts (%d after primary-range filter)",
+            "Chunk %d/%d (%.0f-%.0fs): %d ad breaks (%d after primary-range filter)",
             i + 1,
             len(chunks),
             chunk.primary_start,
             chunk.primary_end,
-            len(response.adverts),
+            len(breaks),
             len(filtered),
         )
 
-    merged = merge_adverts(per_chunk)
+    merged = merge_ad_breaks(per_chunk)
 
     report.input_tokens = total_input
     report.output_tokens = total_output
     report.cost_usd = total_cost
-    report.adverts_found = len(merged)
+    report.ad_breaks_found = len(merged)
     logger.info(
-        "Chunked analysis complete: %d adverts (from %d across chunks)",
+        "Chunked analysis complete: %d ad breaks (from %d across chunks)",
         len(merged),
         sum(len(c) for c in per_chunk),
     )
