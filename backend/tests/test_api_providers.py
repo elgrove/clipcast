@@ -155,7 +155,7 @@ def test_auto_create_gemini_creates_one_dual_capability_model(client):
     gemini_models = [m for m in models if m["provider_id"] == provider["id"]]
     assert len(gemini_models) == 1
     m = gemini_models[0]
-    assert m["name"] == "gemini-2.5-flash"
+    assert m["name"] == "gemini-3.1-flash-lite"
     assert m["supports_transcription"] is True
     assert m["supports_analysis"] is True
 

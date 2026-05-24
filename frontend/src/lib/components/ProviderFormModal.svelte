@@ -131,6 +131,11 @@
                             <option value={editProvider.kind}>{KIND_INFO[editProvider.kind].label}</option>
                         {/if}
                     </select>
+                    {#if !editProvider}
+                        <p class="mt-2 text-xs text-zinc-500 dark:text-zinc-400">
+                            We recommend Gemini, or OpenRouter using Google's Gemini models — they give the best ad-detection results.
+                        </p>
+                    {/if}
                 </div>
 
                 {#if requiresName}
