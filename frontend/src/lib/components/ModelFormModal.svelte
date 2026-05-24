@@ -7,14 +7,14 @@
         const onlyTx = tx && !an;
         const onlyAn = an && !tx;
         if (!onlyTx && !onlyAn) return null;
-        if (k === 'gemini') return 'gemini-2.5-flash';
+        if (k === 'gemini') return 'gemini-3.1-flash-lite';
         if (k === 'openai') {
             if (onlyTx) return 'gpt-4o-mini-transcribe';
             if (onlyAn) return 'gpt-4.1-mini';
         }
         if (k === 'openrouter') {
             if (onlyTx) return 'openai/whisper-large-v3';
-            if (onlyAn) return 'google/gemini-2.5-flash';
+            if (onlyAn) return 'google/gemini-3.1-flash-lite';
         }
         return null;
     }
@@ -48,7 +48,7 @@
     );
 
     const customPlaceholder = $derived.by(() => {
-        if (providerKind === 'gemini') return 'e.g. gemini-2.5-flash';
+        if (providerKind === 'gemini') return 'e.g. gemini-3.1-flash-lite';
         if (providerKind === 'openai' || providerKind === 'openai-compatible') return 'e.g. gpt-4o-mini-transcribe';
         if (providerKind === 'openrouter') return 'e.g. anthropic/claude-3.5-sonnet';
         return 'e.g. model-id';

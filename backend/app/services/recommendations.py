@@ -18,7 +18,7 @@ def recommended_models(kind: Provider) -> list[dict]:
     if kind == Provider.GEMINI:
         return [
             {
-                "name": "gemini-2.5-flash",
+                "name": "gemini-3.1-flash-lite",
                 "supports_transcription": True,
                 "supports_analysis": True,
             },
@@ -44,7 +44,7 @@ def recommended_models(kind: Provider) -> list[dict]:
                 "supports_analysis": False,
             },
             {
-                "name": "google/gemini-2.5-flash",
+                "name": "google/gemini-3.1-flash-lite",
                 "supports_transcription": False,
                 "supports_analysis": True,
             },
