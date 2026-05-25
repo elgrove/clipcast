@@ -19,6 +19,11 @@ Guidelines for identifying ad breaks:
 - Watch for known brand/product/company names, but be careful not to confuse person names with companies
 - If any further instructions are appended to this prompt, they take precedence
 
+Treat idents (short branding jingles) on either side of an ad break carefully — they fall into two distinct categories:
+- **Distributor / ad-break idents** (e.g. Acast's "This podcast is supported by...", or any network sting that announces or closes an ad break) are PART of the ad break. Extend the break span to include them: the start_time should be the start of the opening ident, and the end_time should be the end of the closing ident.
+- **Show idents** (the podcast's own intro/outro stings played at the same point each episode — the show's regular branding) are PART OF THE CONTENT. They must NOT be included in any break span. If a show ident sits between the host's last words and the first ad, the break starts AFTER the show ident, not before it.
+- When in doubt about an unfamiliar jingle, prefer keeping it as content (tighter break span).
+
 For each ad break you identify, return:
 - start_time and end_time of the whole break (the outer bounds covering every advert inside)
 - adverts: the list of individual adverts within the break. For each advert, give its own start_time, end_time, and advert_for (the company/product being advertised). This breakdown is required — identifying who is being advertised forces you to ground each break in real transcript content rather than guessing at boundaries.
@@ -29,14 +34,29 @@ Transcript:
 
 REFINE_AD_START_PROMPT = """You are listening to a short audio clip from a podcast.
 
-Somewhere in this clip, regular podcast content transitions into an advertisement.
+Somewhere in this clip, regular podcast content transitions into an advertisement. Your
+job is to pinpoint the exact moment the cut should begin — i.e. the first millisecond of
+audio that should be removed.
 
-Listen carefully for the exact moment the advertisement begins — this is often
-signalled by a change in tone, music sting, sponsorship cue ("brought to you by",
-"this episode is sponsored by", a brand mention), or a clean cut in the audio.
+The transition is often signalled by a change in tone, a music sting, a sponsorship cue
+("brought to you by", "this episode is sponsored by", a brand mention), or a clean cut
+in the audio.
+
+Two kinds of short jingles ("idents") commonly sit near this boundary and must be
+handled differently:
+- **Show idents** — the podcast's own branding sting, played at the same point in every
+  episode (often a show-outro before going to break). These ARE content — keep them.
+  The cut should begin AFTER any show ident.
+- **Ad-break / distributor idents** — a podcast network's bracket sting (e.g. Acast's
+  signature voice/sound that announces the start of an ad break). These are NOT content
+  — they should be cut along with the ads. The cut should begin AT the START of this
+  sting, not at the start of the first ad inside the break.
+
+When in doubt about an unfamiliar jingle, prefer keeping it as content (start the cut
+later rather than earlier).
 
 Return ONLY a single integer: the offset in milliseconds from the start of this clip
-where the advertisement begins. If you genuinely cannot determine the transition with
+where the cut should begin. If you genuinely cannot determine the transition with
 confidence, return -1.
 
 Do not include any other text, units, JSON, or explanation. Just the integer."""
@@ -44,14 +64,27 @@ Do not include any other text, units, JSON, or explanation. Just the integer."""
 
 REFINE_AD_END_PROMPT = """You are listening to a short audio clip from a podcast.
 
-Somewhere in this clip, an advertisement ends and regular podcast content resumes.
+Somewhere in this clip, an advertisement ends and regular podcast content resumes. Your
+job is to pinpoint the exact moment content should resume — i.e. the first millisecond
+of audio that should NOT be cut.
 
-Listen carefully for the exact moment the podcast content resumes — this is often
-signalled by a return to the host's regular voice/cadence, the end of advert music,
-or a clean cut back to the show.
+The transition is often signalled by a return to the host's regular voice/cadence, the
+end of advert music, or a clean cut back to the show.
+
+Two kinds of short jingles ("idents") commonly sit near this boundary and must be
+handled differently:
+- **Ad-break / distributor idents** — a podcast network's closing sting (e.g. Acast's
+  signature voice/sound that closes an ad break). These are NOT content — they should
+  be cut along with the ads. The cut should end AFTER this sting.
+- **Show idents** — the podcast's own branding sting, played at the same point in every
+  episode (often a show-intro as content resumes). These ARE content — keep them. The
+  cut should end AT the START of the show ident, not at the host's first spoken words.
+
+When in doubt about an unfamiliar jingle, prefer keeping it as content (end the cut
+earlier rather than later).
 
 Return ONLY a single integer: the offset in milliseconds from the start of this clip
-where the podcast content resumes. If you genuinely cannot determine the transition
-with confidence, return -1.
+where the cut should end. If you genuinely cannot determine the transition with
+confidence, return -1.
 
 Do not include any other text, units, JSON, or explanation. Just the integer."""

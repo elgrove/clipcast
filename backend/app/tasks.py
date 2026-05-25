@@ -1,9 +1,6 @@
 import json
 import logging
-import os
-import tempfile
 from datetime import datetime, timedelta
-from pathlib import Path
 
 from celery import chain
 from pydub import AudioSegment
@@ -25,14 +22,12 @@ from app.models import (
 from app.services.download import download_episode
 from app.services.editor import edit_episode, format_ms_to_time, parse_time_to_ms
 from app.services.providers import get_ai_provider
+from app.services.refinement import refine_or_snap_boundary
 from app.worker import celery_app
 
 logger = logging.getLogger("clipcast")
 
 STALE_REPORT_THRESHOLD = timedelta(hours=4)
-
-SNAP_TO_EDGE_MS = 5000  # snap an outer ad-break edge to 0 / episode-end if within this gap
-REFINEMENT_WINDOW_MS = 10_000  # ±10s around the analysed boundary → 20s symmetric window
 
 
 def _update_report(report_id: str, **fields) -> None:
@@ -334,25 +329,28 @@ def task_refine_boundaries(self, episode_id: str, report_id: str) -> None:
             break_start_ms = parse_time_to_ms(ad_break.start_time)
             break_end_ms = parse_time_to_ms(ad_break.end_time)
 
-            new_start_ms = _refine_or_snap_boundary(
+            def log(message: str) -> None:
+                _log_report(report_id, message)
+
+            new_start_ms = refine_or_snap_boundary(
                 audio=audio,
                 episode_duration_ms=episode_duration_ms,
                 break_index=index,
                 boundary_ms=break_start_ms,
                 direction="ad_start",
                 provider=provider,
-                report_id=report_id,
                 refinement_report=refinement_report,
+                log=log,
             )
-            new_end_ms = _refine_or_snap_boundary(
+            new_end_ms = refine_or_snap_boundary(
                 audio=audio,
                 episode_duration_ms=episode_duration_ms,
                 break_index=index,
                 boundary_ms=break_end_ms,
                 direction="ad_end",
                 provider=provider,
-                report_id=report_id,
                 refinement_report=refinement_report,
+                log=log,
             )
 
             if new_end_ms <= new_start_ms:
@@ -404,78 +402,6 @@ def task_refine_boundaries(self, episode_id: str, report_id: str) -> None:
     ad_breaks_path.write_text(
         json.dumps({"breaks": [b.model_dump() for b in refined_breaks]}, indent=2)
     )
-
-
-def _refine_or_snap_boundary(
-    *,
-    audio,
-    episode_duration_ms: int,
-    break_index: int,
-    boundary_ms: int,
-    direction: str,
-    provider,
-    report_id: str,
-    refinement_report: RefinementReport,
-) -> int:
-    """Decide whether to snap, refine, or keep a single boundary. Returns the
-    new (or unchanged) boundary in absolute ms. Mutates `refinement_report`
-    counters and appends per-boundary outcomes to the report log."""
-    is_outer_edge = (direction == "ad_start" and boundary_ms < SNAP_TO_EDGE_MS) or (
-        direction == "ad_end" and (episode_duration_ms - boundary_ms) < SNAP_TO_EDGE_MS
-    )
-    if is_outer_edge:
-        snapped_ms = 0 if direction == "ad_start" else episode_duration_ms
-        refinement_report.boundaries_snapped += 1
-        _log_report(
-            report_id,
-            f"Break {break_index} {direction}: snapped {format_ms_to_time(boundary_ms)} → "
-            f"{format_ms_to_time(snapped_ms)} (within {SNAP_TO_EDGE_MS}ms of episode edge)",
-        )
-        return snapped_ms
-
-    window_start_ms = max(0, boundary_ms - REFINEMENT_WINDOW_MS)
-    window_end_ms = min(episode_duration_ms, boundary_ms + REFINEMENT_WINDOW_MS)
-    if window_end_ms <= window_start_ms:
-        refinement_report.boundaries_kept += 1
-        _log_report(
-            report_id,
-            f"Break {break_index} {direction}: window collapsed, keeping original boundary",
-        )
-        return boundary_ms
-
-    window_audio = audio[window_start_ms:window_end_ms]
-    temp_fd, temp_path_str = tempfile.mkstemp(suffix=".mp3")
-    temp_path = Path(temp_path_str)
-    os.close(temp_fd)
-    try:
-        window_audio.export(temp_path, format="mp3")
-        offset_in_window = provider.refine_boundary(
-            audio_path=temp_path,
-            direction=direction,
-            report=refinement_report,
-        )
-    finally:
-        if temp_path.exists():
-            temp_path.unlink()
-
-    window_length_ms = window_end_ms - window_start_ms
-    if offset_in_window is None or offset_in_window > window_length_ms:
-        refinement_report.boundaries_kept += 1
-        _log_report(
-            report_id,
-            f"Break {break_index} {direction}: model could not determine boundary "
-            f"(returned {offset_in_window!r}), keeping original",
-        )
-        return boundary_ms
-
-    refined_ms = window_start_ms + offset_in_window
-    refinement_report.boundaries_refined += 1
-    _log_report(
-        report_id,
-        f"Break {break_index} {direction}: refined {format_ms_to_time(boundary_ms)} → "
-        f"{format_ms_to_time(refined_ms)}",
-    )
-    return refined_ms
 
 
 @celery_app.task(

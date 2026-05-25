@@ -3,12 +3,14 @@ from __future__ import annotations
 import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, get_args
 
-from .pipeline import EvalCase, PipelineResult, load_case, result_to_dict, run_case
+from .pipeline import EvalCase, EvalMode, PipelineResult, load_case, result_to_dict, run_case
 from .providers import ModelSpec, parse_model_spec
 
 RUNS_DIR = Path(__file__).parent / "runs"
+
+_VALID_MODES = get_args(EvalMode)
 
 
 class RunConfigError(ValueError):
@@ -23,7 +25,8 @@ class CaseConfig:
     id: str
     podcast: str | None
     custom_prompt: str | None
-    use_acast: bool
+    mode: EvalMode
+    refinement_model: ModelSpec | None
     iou_threshold: float | None
     break_cluster_gap_s: float | None
 
@@ -32,9 +35,10 @@ class CaseConfig:
 class RunConfig:
     name: str
     iou_threshold: float
-    use_acast_default: bool
+    mode_default: EvalMode
     break_cluster_gap_s: float
     models: list[ModelSpec]
+    refinement_model_default: ModelSpec | None
     cases: list[CaseConfig]
     source_path: Path | None = None
 
@@ -42,9 +46,10 @@ class RunConfig:
 _ALLOWED_RUN_KEYS = {
     "name",
     "iou_threshold",
-    "use_acast",
+    "mode",
     "break_cluster_gap_s",
     "models",
+    "refinement_model",
     "cases",
 }
 _ALLOWED_MODEL_KEYS = {"spec", "provider", "model"}
@@ -52,16 +57,21 @@ _ALLOWED_CASE_KEYS = {
     "id",
     "podcast",
     "custom_prompt",
-    "use_acast",
+    "mode",
+    "refinement_model",
     "iou_threshold",
     "break_cluster_gap_s",
 }
 
 
-def _coerce_bool(value: Any, key: str) -> bool:
-    if not isinstance(value, bool):
-        raise RunConfigError(f"{key} must be a boolean, got {type(value).__name__}")
-    return value
+def _coerce_mode(value: Any, key: str) -> EvalMode:
+    if not isinstance(value, str):
+        raise RunConfigError(f"{key} must be a string, got {type(value).__name__}")
+    if value not in _VALID_MODES:
+        raise RunConfigError(
+            f"{key} must be one of {sorted(_VALID_MODES)}, got {value!r}"
+        )
+    return value  # type: ignore[return-value]
 
 
 def _coerce_float(value: Any, key: str) -> float:
@@ -97,12 +107,17 @@ def _parse_model(entry: Any, idx: int) -> ModelSpec:
     return parse_model_spec(f"{_coerce_str(provider, 'provider')}:{_coerce_str(model, 'model')}")
 
 
-def _parse_case(entry: Any, idx: int, default_use_acast: bool) -> CaseConfig:
+def _parse_case(entry: Any, idx: int, default_mode: EvalMode) -> CaseConfig:
     if not isinstance(entry, dict):
         raise RunConfigError(f"[[cases]][{idx}] must be a table")
     _reject_unknown(entry, _ALLOWED_CASE_KEYS, f"[[cases]][{idx}]")
     if "id" not in entry:
         raise RunConfigError(f"[[cases]][{idx}] is missing required 'id'")
+
+    refinement_model_entry = entry.get("refinement_model")
+    refinement_model = (
+        _parse_model(refinement_model_entry, idx) if refinement_model_entry is not None else None
+    )
 
     return CaseConfig(
         id=_coerce_str(entry["id"], f"cases[{idx}].id"),
@@ -112,9 +127,8 @@ def _parse_case(entry: Any, idx: int, default_use_acast: bool) -> CaseConfig:
         custom_prompt=_coerce_str(entry["custom_prompt"], f"cases[{idx}].custom_prompt")
         if "custom_prompt" in entry
         else None,
-        use_acast=_coerce_bool(entry["use_acast"], f"cases[{idx}].use_acast")
-        if "use_acast" in entry
-        else default_use_acast,
+        mode=_coerce_mode(entry["mode"], f"cases[{idx}].mode") if "mode" in entry else default_mode,
+        refinement_model=refinement_model,
         iou_threshold=_coerce_float(entry["iou_threshold"], f"cases[{idx}].iou_threshold")
         if "iou_threshold" in entry
         else None,
@@ -137,11 +151,19 @@ def load_run_config(path: str | Path) -> RunConfig:
     run_section = data.get("run", {})
     if not isinstance(run_section, dict):
         raise RunConfigError("[run] must be a table")
+
+    if "use_acast" in run_section:
+        raise RunConfigError(
+            "run.use_acast was replaced by run.mode (one of 'ai', 'ai_refined', 'acast')"
+        )
+
     _reject_unknown(run_section, _ALLOWED_RUN_KEYS - {"models", "cases"}, "[run]")
 
     name = _coerce_str(run_section.get("name", path.stem), "run.name")
     iou_threshold = _coerce_float(run_section.get("iou_threshold", 0.5), "run.iou_threshold")
-    use_acast_default = _coerce_bool(run_section.get("use_acast", False), "run.use_acast")
+    mode_default = (
+        _coerce_mode(run_section["mode"], "run.mode") if "mode" in run_section else "ai"
+    )
     break_cluster_gap_s = _coerce_float(
         run_section.get("break_cluster_gap_s", 5.0), "run.break_cluster_gap_s"
     )
@@ -151,24 +173,36 @@ def load_run_config(path: str | Path) -> RunConfig:
         raise RunConfigError("[[models]] must be an array of tables")
     models = [_parse_model(entry, i) for i, entry in enumerate(raw_models)]
 
+    refinement_model_default: ModelSpec | None = None
+    if "refinement_model" in run_section:
+        refinement_model_default = _parse_model(run_section["refinement_model"], -1)
+
     raw_cases = data.get("cases", [])
     if not isinstance(raw_cases, list):
         raise RunConfigError("[[cases]] must be an array of tables")
-    cases = [_parse_case(entry, i, use_acast_default) for i, entry in enumerate(raw_cases)]
+    cases = [_parse_case(entry, i, mode_default) for i, entry in enumerate(raw_cases)]
 
     if not cases:
         raise RunConfigError(f"Run config {path} declares no [[cases]]")
 
-    needs_models = any(not c.use_acast for c in cases)
+    needs_models = any(c.mode != "acast" for c in cases)
     if needs_models and not models:
-        raise RunConfigError("At least one case has use_acast=false but no [[models]] are declared")
+        raise RunConfigError("At least one case has mode!='acast' but no [[models]] are declared")
+
+    for idx, c in enumerate(cases):
+        if c.mode == "ai_refined" and c.refinement_model is None and refinement_model_default is None:
+            raise RunConfigError(
+                f"cases[{idx}] has mode='ai_refined' but no refinement_model is declared "
+                "(set run.refinement_model or cases[].refinement_model)"
+            )
 
     return RunConfig(
         name=name,
         iou_threshold=iou_threshold,
-        use_acast_default=use_acast_default,
+        mode_default=mode_default,
         break_cluster_gap_s=break_cluster_gap_s,
         models=models,
+        refinement_model_default=refinement_model_default,
         cases=cases,
         source_path=path,
     )
@@ -207,7 +241,13 @@ class ModelRunSummary:
     total_cost_usd: float
     total_input_tokens: int
     total_output_tokens: int
-    total_duration_s: float
+    total_refinement_cost_usd: float = 0.0
+    total_refinement_input_tokens: int = 0
+    total_refinement_output_tokens: int = 0
+    total_boundaries_refined: int = 0
+    total_boundaries_snapped: int = 0
+    total_boundaries_kept: int = 0
+    total_duration_s: float = 0.0
     results: list[PipelineResult] = field(default_factory=list)
 
 
@@ -221,14 +261,20 @@ class RunSummary:
         return {
             "name": self.config.name,
             "iou_threshold": self.config.iou_threshold,
-            "use_acast_default": self.config.use_acast_default,
+            "mode_default": self.config.mode_default,
             "break_cluster_gap_s": self.config.break_cluster_gap_s,
             "models": [m.label for m in self.config.models],
+            "refinement_model_default": (
+                self.config.refinement_model_default.label
+                if self.config.refinement_model_default
+                else None
+            ),
             "cases": [
                 {
                     "id": c.id,
                     "podcast": c.podcast,
-                    "use_acast": c.use_acast,
+                    "mode": c.mode,
+                    "refinement_model": c.refinement_model.label if c.refinement_model else None,
                     "iou_threshold": c.iou_threshold,
                     "break_cluster_gap_s": c.break_cluster_gap_s,
                 }
@@ -255,6 +301,12 @@ class RunSummary:
                     "total_cost_usd": m.total_cost_usd,
                     "total_input_tokens": m.total_input_tokens,
                     "total_output_tokens": m.total_output_tokens,
+                    "total_refinement_cost_usd": m.total_refinement_cost_usd,
+                    "total_refinement_input_tokens": m.total_refinement_input_tokens,
+                    "total_refinement_output_tokens": m.total_refinement_output_tokens,
+                    "total_boundaries_refined": m.total_boundaries_refined,
+                    "total_boundaries_snapped": m.total_boundaries_snapped,
+                    "total_boundaries_kept": m.total_boundaries_kept,
                     "total_duration_s": m.total_duration_s,
                     "results": [result_to_dict(r) for r in m.results],
                 }
@@ -302,8 +354,8 @@ def _mean_name_similarity(results: list[PipelineResult]) -> float:
 def execute_run(config: RunConfig) -> RunSummary:
     loaded_cases: dict[str, EvalCase] = {c.id: load_case(c.id) for c in config.cases}
 
-    ai_cases = [c for c in config.cases if not c.use_acast]
-    acast_cases = [c for c in config.cases if c.use_acast]
+    ai_cases = [c for c in config.cases if c.mode != "acast"]
+    acast_cases = [c for c in config.cases if c.mode == "acast"]
 
     # Acast results are independent of the AI model — run once and share.
     acast_results: list[PipelineResult] = []
@@ -317,7 +369,7 @@ def execute_run(config: RunConfig) -> RunSummary:
         acast_results.append(
             run_case(
                 loaded_cases[case_cfg.id],
-                use_acast=True,
+                mode="acast",
                 model=None,
                 custom_prompt=None,
                 iou_threshold=iou,
@@ -336,11 +388,17 @@ def execute_run(config: RunConfig) -> RunSummary:
                     if case_cfg.break_cluster_gap_s is not None
                     else config.break_cluster_gap_s
                 )
+                refinement_model = (
+                    case_cfg.refinement_model
+                    if case_cfg.refinement_model is not None
+                    else config.refinement_model_default
+                )
                 ai_results.append(
                     run_case(
                         loaded_cases[case_cfg.id],
-                        use_acast=False,
+                        mode=case_cfg.mode,
                         model=model_spec,
+                        refinement_model=refinement_model,
                         custom_prompt=case_cfg.custom_prompt,
                         iou_threshold=iou,
                         break_cluster_gap_s=gap,
@@ -370,6 +428,22 @@ def execute_run(config: RunConfig) -> RunSummary:
                     total_cost_usd=sum(res.cost_usd or 0.0 for res in combined),
                     total_input_tokens=sum(res.input_tokens or 0 for res in combined),
                     total_output_tokens=sum(res.output_tokens or 0 for res in combined),
+                    total_refinement_cost_usd=sum(
+                        res.refinement_cost_usd or 0.0 for res in combined
+                    ),
+                    total_refinement_input_tokens=sum(
+                        res.refinement_input_tokens or 0 for res in combined
+                    ),
+                    total_refinement_output_tokens=sum(
+                        res.refinement_output_tokens or 0 for res in combined
+                    ),
+                    total_boundaries_refined=sum(
+                        res.boundaries_refined or 0 for res in combined
+                    ),
+                    total_boundaries_snapped=sum(
+                        res.boundaries_snapped or 0 for res in combined
+                    ),
+                    total_boundaries_kept=sum(res.boundaries_kept or 0 for res in combined),
                     total_duration_s=sum(res.duration_seconds or 0.0 for res in combined),
                     results=combined,
                 )
