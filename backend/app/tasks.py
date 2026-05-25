@@ -553,11 +553,14 @@ def queue_episode_for_clipping(
     else:
         assert clip_mode == ClipMode.AI, f"Unexpected clip_mode: {clip_mode}"
         transcription_queue = _get_transcription_queue(session)
+        # NOTE: task_refine_boundaries is intentionally NOT wired into this chain
+        # — boundary refinement is gated on offline eval results before being
+        # enabled in production. The task and its shared helper remain available
+        # for the eval pipeline (mode = "ai_refined") and for one-off invocation.
         pipeline = chain(
             task_download.si(episode.id, report.id),
             task_transcribe.si(episode.id, report.id).set(queue=transcription_queue),
             task_analyse.si(episode.id, report.id),
-            task_refine_boundaries.si(episode.id, report.id).set(queue="ai"),
             task_edit.si(episode.id, report.id),
         )
 
