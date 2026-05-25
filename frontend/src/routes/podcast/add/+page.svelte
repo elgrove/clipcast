@@ -11,7 +11,7 @@
 	let debounceTimer: ReturnType<typeof setTimeout> | undefined;
 
 	let selectedPodcast: ITunesSearchResult | null = $state(null);
-	let clipMode = $state<'ai' | 'acast' | 'off'>('ai');
+	let checkForAds = $state(true);
 	let adding = $state(false);
 
 	$effect(() => {
@@ -39,7 +39,7 @@
 		if (!selectedPodcast) return;
 		adding = true;
 		try {
-			const podcast = await addPodcast(selectedPodcast.itunes_id, clipMode);
+			const podcast = await addPodcast(selectedPodcast.itunes_id, checkForAds ? 'ai' : 'off');
 			toasts.addToast('success', `Added "${podcast.title}" to library`);
 			goto(`/podcast/${podcast.id}`);
 		} catch (e: any) {
@@ -85,7 +85,7 @@
 				<button
 					onclick={() => {
 						selectedPodcast = result;
-						clipMode = result.ads_by_acast ? 'acast' : 'ai';
+						checkForAds = true;
 					}}
 					class="group overflow-hidden rounded-xl border border-zinc-200 bg-white text-left transition-all hover:shadow-lg hover:ring-2 hover:ring-emerald-500/30 active:scale-[0.98] dark:border-zinc-800 dark:bg-zinc-900 dark:hover:border-zinc-700"
 				>
@@ -143,13 +143,13 @@
 			</div>
 
 			<div class="mt-6">
-				<p class="mb-2 text-sm font-medium text-zinc-700 dark:text-zinc-300">Clipping mode</p>
+				<p class="mb-2 text-sm font-medium text-zinc-700 dark:text-zinc-300">Check episodes for ads?</p>
 				<div class="flex rounded-lg border border-zinc-200 dark:border-zinc-700 overflow-hidden">
-					{#each [{ value: 'ai', label: 'AI clipping' }, { value: 'acast', label: 'Acast' }, { value: 'off', label: 'Off' }] as option}
+					{#each [{ value: true, label: 'Yes' }, { value: false, label: 'No' }] as option}
 						<button
 							type="button"
-							onclick={() => (clipMode = option.value as 'ai' | 'acast' | 'off')}
-							class="flex-1 py-2 text-sm font-medium transition-colors {clipMode === option.value
+							onclick={() => (checkForAds = option.value)}
+							class="flex-1 py-2 text-sm font-medium transition-colors {checkForAds === option.value
 								? 'bg-emerald-600 text-white'
 								: 'text-zinc-600 hover:bg-zinc-50 dark:text-zinc-400 dark:hover:bg-zinc-800'}"
 						>
