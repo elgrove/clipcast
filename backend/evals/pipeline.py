@@ -15,7 +15,9 @@ from app.services.acast import detect_idents, idents_to_ad_breaks, pair_idents
 from app.services.analysis import analyse_transcription
 
 from .metrics import (
+    BoundaryMetrics,
     Interval,
+    boundary_metrics,
     cluster_regions,
     duration_metrics,
     match_intervals,
@@ -201,6 +203,8 @@ class PipelineResult:
     unmatched_optional: list[dict[str, Any]] = field(default_factory=list)
     name_matches: list[NameMatch] = field(default_factory=list)
     name_similarity_mean: float = 0.0
+    # Boundary deltas across required matches (predicted - expected, seconds)
+    boundary: BoundaryMetrics | None = None
     # Break-level metrics — touching ads clustered into ad breaks
     predicted_breaks: list[dict[str, Any]] = field(default_factory=list)
     expected_breaks: list[dict[str, Any]] = field(default_factory=list)
@@ -216,6 +220,7 @@ class PipelineResult:
     break_false_negatives: list[dict[str, Any]] = field(default_factory=list)
     break_absorbed: list[dict[str, Any]] = field(default_factory=list)
     break_unmatched_optional: list[dict[str, Any]] = field(default_factory=list)
+    break_boundary: BoundaryMetrics | None = None
     # Pipeline-level diagnostics
     audio_duration_s: float | None = None
     raw_ident_count: int | None = None
@@ -442,6 +447,16 @@ def run_case(
     result.name_similarity_mean = (
         sum(n.similarity for n in name_scores) / len(name_scores) if name_scores else 0.0
     )
+    # Boundary deltas — only over required matches (optional absorbs aren't
+    # held to a timing standard).
+    ad_pairs = [
+        (
+            pred_intervals[match.matches[i].predicted_index],
+            exp_intervals[match.matches[i].expected_index],
+        )
+        for i in scores.matched_required
+    ]
+    result.boundary = boundary_metrics(ad_pairs)
 
     # ── Break-level: the model returns breaks directly; expected ground truth
     # is still per-advert so we cluster it to get break-equivalent boundaries.
@@ -478,6 +493,14 @@ def run_case(
     result.break_unmatched_optional = [
         _interval_to_dict(exp_breaks[i]) for i in break_scores.unmatched_optional_indices
     ]
+    break_pairs = [
+        (
+            pred_breaks[break_match.matches[i].predicted_index],
+            exp_breaks[break_match.matches[i].expected_index],
+        )
+        for i in break_scores.matched_required
+    ]
+    result.break_boundary = boundary_metrics(break_pairs)
 
     return result
 

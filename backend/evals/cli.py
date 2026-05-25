@@ -58,6 +58,19 @@ def _fmt_tokens(n: int | None) -> str:
     return f"{n / 1_000_000:.2f}M"
 
 
+def _fmt_seconds(x: float | None) -> str:
+    """Compact seconds formatter for boundary deltas (e.g. '+1.2s', '-0.7s')."""
+    if x is None:
+        return "-"
+    return f"{x:+.1f}s"
+
+
+def _fmt_abs_seconds(x: float | None) -> str:
+    if x is None:
+        return "-"
+    return f"{x:.1f}s"
+
+
 def _write_report(summary: dict[str, Any], run_name: str) -> Path:
     REPORTS_DIR.mkdir(parents=True, exist_ok=True)
     timestamp = datetime.utcnow().strftime("%Y%m%dT%H%M%SZ")
@@ -68,6 +81,21 @@ def _write_report(summary: dict[str, Any], run_name: str) -> Path:
 
 
 # ── Output ───────────────────────────────────────────────────────────────────
+
+
+def _fmt_boundary_summary(b: Any) -> str:
+    """One-line break-level boundary summary: signed bias + worst case at each edge."""
+    if b is None or getattr(b, "count", 0) == 0:
+        return "no matches"
+    return (
+        f"start μ {_fmt_seconds(b.start_mean)} "
+        f"(|μ| {_fmt_abs_seconds(b.start_abs_mean)}, "
+        f"p95 {_fmt_abs_seconds(b.start_abs_p95)})  "
+        f"end μ {_fmt_seconds(b.end_mean)} "
+        f"(|μ| {_fmt_abs_seconds(b.end_abs_mean)}, "
+        f"p95 {_fmt_abs_seconds(b.end_abs_p95)})  "
+        f"n={b.count}"
+    )
 
 
 def _print_model_run(m: run.ModelRunSummary) -> None:
@@ -86,6 +114,7 @@ def _print_model_run(m: run.ModelRunSummary) -> None:
         f"Break-level P: {_fmt_pct(m.break_precision)}  R: {_fmt_pct(m.break_recall)}  "
         f"F1: {_fmt_pct(m.break_f1)}"
     )
+    print(f"Break boundary: {_fmt_boundary_summary(m.break_boundary)}")
     cost_str = f"${m.total_cost_usd:.4f}" if m.total_cost_usd else "$0.0000"
     print(
         f"Total cost: {cost_str}  "
@@ -104,6 +133,8 @@ def _print_model_run(m: run.ModelRunSummary) -> None:
         "brk-P",
         "brk-R",
         "brk-F1",
+        "brk-s|μ|",
+        "brk-e|μ|",
         "dur-P",
         "dur-R",
         "in",
@@ -113,6 +144,7 @@ def _print_model_run(m: run.ModelRunSummary) -> None:
     rows = []
     for r in m.results:
         mode = "acast" if r.use_acast else "ai"
+        bb = r.break_boundary
         rows.append(
             [
                 r.case_id,
@@ -124,6 +156,8 @@ def _print_model_run(m: run.ModelRunSummary) -> None:
                 _fmt_pct(r.break_precision),
                 _fmt_pct(r.break_recall),
                 _fmt_pct(r.break_f1),
+                _fmt_abs_seconds(bb.start_abs_mean) if bb and bb.count else "-",
+                _fmt_abs_seconds(bb.end_abs_mean) if bb and bb.count else "-",
                 _fmt_pct(r.break_duration_precision),
                 _fmt_pct(r.break_duration_coverage),
                 _fmt_tokens(r.input_tokens),
@@ -152,6 +186,8 @@ def _print_comparison(summary: run.RunSummary) -> None:
         "brk-F1",
         "ads",
         "brks",
+        "brk-s|μ|",
+        "brk-e|μ|",
         "in",
         "out",
         "$",
@@ -159,6 +195,8 @@ def _print_comparison(summary: run.RunSummary) -> None:
     ]
     rows = []
     for m in summary.per_model:
+        bb = m.break_boundary
+        has_b = bb is not None and bb.count > 0
         rows.append(
             [
                 m.model or f"({m.provider})",
@@ -167,6 +205,8 @@ def _print_comparison(summary: run.RunSummary) -> None:
                 _fmt_pct(m.break_f1),
                 f"{m.total_matched}/{m.total_expected}",
                 f"{m.break_total_matched}/{m.break_total_expected}",
+                _fmt_abs_seconds(bb.start_abs_mean) if has_b else "-",
+                _fmt_abs_seconds(bb.end_abs_mean) if has_b else "-",
                 _fmt_tokens(m.total_input_tokens),
                 _fmt_tokens(m.total_output_tokens),
                 _fmt_float(m.total_cost_usd, 4),

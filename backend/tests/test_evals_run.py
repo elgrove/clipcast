@@ -2,8 +2,9 @@ import textwrap
 
 import pytest
 
+from evals.pipeline import PipelineResult
 from evals.providers import ModelSpec
-from evals.run import RunConfigError, load_run_config
+from evals.run import RunConfigError, _aggregate_boundary, load_run_config
 
 
 def _write(tmp_path, body: str):
@@ -228,3 +229,47 @@ def test_load_rejects_bad_type(tmp_path):
     )
     with pytest.raises(RunConfigError, match="must be a string"):
         load_run_config(path)
+
+
+# ── boundary aggregation ─────────────────────────────────────────────────────
+
+
+def _result_with_boundary(case_id: str, start_deltas, end_deltas) -> PipelineResult:
+    # Build a PipelineResult with only the boundary fields populated — enough
+    # to exercise the cross-case aggregator without spinning up a provider.
+    from evals.metrics import boundary_metrics_from_deltas
+
+    res = PipelineResult(case_id=case_id, iou_threshold=0.5, use_acast=False)
+    bm = boundary_metrics_from_deltas(start_deltas, end_deltas)
+    res.boundary = bm
+    res.break_boundary = bm
+    return res
+
+
+def test_aggregate_boundary_concatenates_deltas_across_cases():
+    a = _result_with_boundary("a", [1.0, -2.0], [3.0, -1.0])
+    b = _result_with_boundary("b", [4.0], [0.5])
+    agg = _aggregate_boundary([a, b], "boundary")
+    assert agg.count == 3
+    # Means should match the flat concatenation
+    assert agg.start_mean == pytest.approx((1.0 - 2.0 + 4.0) / 3.0)
+    assert agg.start_abs_mean == pytest.approx((1.0 + 2.0 + 4.0) / 3.0)
+    assert agg.end_mean == pytest.approx((3.0 - 1.0 + 0.5) / 3.0)
+    assert agg.end_abs_mean == pytest.approx((3.0 + 1.0 + 0.5) / 3.0)
+
+
+def test_aggregate_boundary_skips_empty_cases():
+    a = _result_with_boundary("a", [], [])
+    b = _result_with_boundary("b", [2.0], [0.0])
+    agg = _aggregate_boundary([a, b], "boundary")
+    assert agg.count == 1
+    assert agg.start_mean == pytest.approx(2.0)
+
+
+def test_aggregate_boundary_handles_none_boundary_field():
+    # A case that errored out before boundary was computed leaves the field as None
+    a = PipelineResult(case_id="a", iou_threshold=0.5, use_acast=False)
+    b = _result_with_boundary("b", [1.0], [2.0])
+    agg = _aggregate_boundary([a, b], "boundary")
+    assert agg.count == 1
+    assert agg.start_mean == pytest.approx(1.0)

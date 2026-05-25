@@ -2,6 +2,8 @@ import pytest
 
 from evals.metrics import (
     Interval,
+    boundary_metrics,
+    boundary_metrics_from_deltas,
     cluster_regions,
     count_metrics,
     duration_metrics,
@@ -349,3 +351,95 @@ def test_cluster_regions_distant_optional_preserved():
     assert len(result) == 2
     assert result[0].optional is False
     assert result[1].optional is True
+
+
+# ── boundary_metrics ─────────────────────────────────────────────────────────
+
+
+def test_boundary_metrics_empty():
+    b = boundary_metrics([])
+    assert b.count == 0
+    assert b.start_mean == 0.0
+    assert b.start_abs_mean == 0.0
+    assert b.start_abs_p95 == 0.0
+    assert b.end_mean == 0.0
+    assert b.end_abs_mean == 0.0
+    assert b.end_abs_p95 == 0.0
+    assert b.start_deltas == []
+    assert b.end_deltas == []
+
+
+def test_boundary_metrics_exact_match():
+    pred = Interval(10.0, 30.0)
+    exp = Interval(10.0, 30.0)
+    b = boundary_metrics([(pred, exp)])
+    assert b.count == 1
+    assert b.start_mean == 0.0
+    assert b.start_abs_mean == 0.0
+    assert b.start_abs_p95 == 0.0
+    assert b.end_mean == 0.0
+
+
+def test_boundary_metrics_signs_predicted_minus_expected():
+    # Predicted starts 2s late and ends 3s early — start delta +2, end delta -3
+    pred = Interval(12.0, 27.0)
+    exp = Interval(10.0, 30.0)
+    b = boundary_metrics([(pred, exp)])
+    assert b.start_mean == pytest.approx(2.0)
+    assert b.start_abs_mean == pytest.approx(2.0)
+    assert b.end_mean == pytest.approx(-3.0)
+    assert b.end_abs_mean == pytest.approx(3.0)
+
+
+def test_boundary_metrics_signed_bias_cancels():
+    # Three pairs with start deltas -2, 0, +2 → signed mean 0, abs mean 4/3
+    pairs = [
+        (Interval(8.0, 30.0), Interval(10.0, 30.0)),  # start -2
+        (Interval(10.0, 30.0), Interval(10.0, 30.0)),  # start 0
+        (Interval(12.0, 30.0), Interval(10.0, 30.0)),  # start +2
+    ]
+    b = boundary_metrics(pairs)
+    assert b.start_mean == pytest.approx(0.0)
+    assert b.start_abs_mean == pytest.approx(4.0 / 3.0)
+
+
+def test_boundary_metrics_p95_tracks_worst_case():
+    # 10 pairs: 9 have a 0.5s end delta, 1 has a 10s end delta. Linear-interp
+    # p95 over a sorted list of [0.5 nine times, 10.0] sits at position
+    # 0.95*(10-1)=8.55,
+    # blending sorted[8]=0.5 and sorted[9]=10.0 → 0.5*0.45 + 10*0.55 = 5.725.
+    # Well above the mean (1.45) and pulled toward the outlier, which is what
+    # we want from a "worst-case tail" metric.
+    pairs = [(Interval(0, 30), Interval(0, 30.5)) for _ in range(9)]
+    pairs.append((Interval(0, 30), Interval(0, 40)))
+    b = boundary_metrics(pairs)
+    assert b.end_abs_mean == pytest.approx((9 * 0.5 + 10.0) / 10)
+    assert b.end_abs_p95 == pytest.approx(0.5 * 0.45 + 10.0 * 0.55)
+    assert b.end_abs_p95 > b.end_abs_mean
+
+
+def test_boundary_metrics_from_deltas_round_trips():
+    # Aggregating two cases of raw deltas should match the pair-based metric
+    # over the same flattened pairs.
+    pairs_a = [
+        (Interval(11.0, 30.0), Interval(10.0, 31.0)),  # +1, -1
+        (Interval(9.0, 32.0), Interval(10.0, 30.0)),  # -1, +2
+    ]
+    pairs_b = [
+        (Interval(14.0, 30.0), Interval(10.0, 28.0)),  # +4, +2
+    ]
+    combined = boundary_metrics(pairs_a + pairs_b)
+
+    a_metrics = boundary_metrics(pairs_a)
+    b_metrics = boundary_metrics(pairs_b)
+    aggregated = boundary_metrics_from_deltas(
+        a_metrics.start_deltas + b_metrics.start_deltas,
+        a_metrics.end_deltas + b_metrics.end_deltas,
+    )
+    assert aggregated.count == combined.count
+    assert aggregated.start_mean == pytest.approx(combined.start_mean)
+    assert aggregated.start_abs_mean == pytest.approx(combined.start_abs_mean)
+    assert aggregated.start_abs_p95 == pytest.approx(combined.start_abs_p95)
+    assert aggregated.end_mean == pytest.approx(combined.end_mean)
+    assert aggregated.end_abs_mean == pytest.approx(combined.end_abs_mean)
+    assert aggregated.end_abs_p95 == pytest.approx(combined.end_abs_p95)
