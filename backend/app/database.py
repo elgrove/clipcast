@@ -1,8 +1,12 @@
 import logging
 from collections.abc import Generator
+from pathlib import Path
 
-from sqlmodel import Session, SQLModel, create_engine
+from alembic.config import Config
+from sqlalchemy import inspect
+from sqlmodel import Session, create_engine
 
+from alembic import command
 from app.config import settings
 
 logger = logging.getLogger("clipcast")
@@ -14,11 +18,34 @@ engine = create_engine(
     pool_pre_ping=True,
 )
 
+ALEMBIC_INI_PATH = Path(__file__).resolve().parent.parent / "alembic.ini"
+
+
+def _alembic_config() -> Config:
+    cfg = Config(str(ALEMBIC_INI_PATH))
+    cfg.set_main_option("script_location", str(ALEMBIC_INI_PATH.parent / "alembic"))
+    cfg.set_main_option("sqlalchemy.url", settings.database_url)
+    return cfg
+
+
+def apply_migrations() -> None:
+    import app.models  # noqa: F401 — ensure models are imported before alembic touches metadata
+
+    cfg = _alembic_config()
+    inspector = inspect(engine)
+    table_names = set(inspector.get_table_names())
+
+    if "alembic_version" not in table_names and "podcast_shows" in table_names:
+        logger.info("Existing database without alembic_version — stamping baseline")
+        command.stamp(cfg, "head")
+        return
+
+    command.upgrade(cfg, "head")
+    logger.info("Database migrations applied")
+
 
 def init_db() -> None:
-    import app.models  # noqa: F401 — ensure all models are registered
-
-    SQLModel.metadata.create_all(engine)
+    apply_migrations()
     with engine.connect() as conn:
         conn.exec_driver_sql("PRAGMA journal_mode=WAL")
         conn.commit()

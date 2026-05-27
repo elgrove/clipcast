@@ -31,7 +31,9 @@ docker compose up                    # full stack (app + 3 workers + redis + whi
 
 ## Architecture
 
-**Backend** (`backend/app/`): FastAPI JSON API with SQLModel ORM on SQLite (WAL mode). `main.py` is the app entrypoint. `config.py` loads settings from env vars via pydantic-settings (no prefix, supports `.env` file). `database.py` manages the SQLModel engine and session.
+**Backend** (`backend/app/`): FastAPI JSON API with SQLModel ORM on SQLite (WAL mode). `main.py` is the app entrypoint. `config.py` loads settings from env vars via pydantic-settings (no prefix, supports `.env` file). `database.py` manages the SQLModel engine, session, and migrations.
+
+**Migrations** (`backend/alembic/`): Alembic, configured via `backend/alembic.ini` with `env.py` wired to `SQLModel.metadata` and `app.config.settings.database_url`. `init_db()` runs `alembic upgrade head` at startup; if it finds existing application tables but no `alembic_version`, it stamps the baseline so pre-alembic deployments adopt the migration history without re-running DDL. Migrations use `render_as_batch=True` so SQLite ALTER operations work.
 
 **API routers** (`backend/app/routers/`): `podcasts.py`, `episodes.py`, `config.py`, `search.py`, `feed.py`, `reports.py`. All return JSON except the feed (XML) and file endpoints.
 
@@ -63,6 +65,37 @@ Beat schedule: `sync_and_process_new_episodes` hourly, `cleanup_old_episodes` da
 - `AIModel` — transcription/analysis model config, supports preset and custom models
 
 API request/response schemas are Pydantic models in the same file (e.g. `PodcastShowRead`, `PodcastEpisodeRead`).
+
+## Working with Alembic
+
+Any change to a model in `backend/app/models.py` that affects the schema (new/dropped/renamed columns, tables, indexes, constraints, type changes) **must** be paired with an Alembic migration in the same change. Don't rely on `create_all` — it has been replaced by `alembic upgrade head` at startup.
+
+```bash
+cd backend
+
+# Generate a revision after editing models. Alembic diffs models against the live DB.
+uv run alembic revision --autogenerate -m "short description"
+
+# Review the generated file in backend/alembic/versions/ — autogenerate is not perfect.
+# Common things to check/fix by hand:
+#   - Column renames (autogen sees them as drop+add — rewrite as op.alter_column)
+#   - Data migrations (autogen never produces these)
+#   - Server-side defaults / check constraints
+#   - On SQLite, ALTERs must run inside op.batch_alter_table(...) blocks
+#     (env.py sets render_as_batch=True so this is usually emitted automatically)
+
+# Apply locally
+uv run alembic upgrade head
+
+# Inspect history / current revision
+uv run alembic history
+uv run alembic current
+
+# Roll back one step (only safe locally — never against shared data)
+uv run alembic downgrade -1
+```
+
+Tests use `SQLModel.metadata.create_all` for speed; the `init_db()` call in `tests/conftest.py` then stamps baseline on the test DB so it stays consistent with production. New migrations don't need test fixtures unless they include data migrations worth verifying.
 
 ## Code Style
 
