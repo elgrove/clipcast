@@ -378,12 +378,14 @@ class ClippingReport(SQLModel, table=True):
 
     @property
     def status(self) -> ClippingStatus:
+        # Refinement is not currently wired into the production chain (pending
+        # offline evaluation), so episodes go ANALYSING → EDITING directly.
+        # The REFINING enum value and `refined_at` column remain available for
+        # the eval pipeline and for a future re-enable.
         if self.edited_at:
             return ClippingStatus.COMPLETED
-        if self.refined_at:
-            return ClippingStatus.EDITING
         if self.analysed_at:
-            return ClippingStatus.REFINING
+            return ClippingStatus.EDITING
         if self.transcribed_at:
             return ClippingStatus.ANALYSING
         if self.downloaded_at:

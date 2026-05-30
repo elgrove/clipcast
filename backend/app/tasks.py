@@ -263,7 +263,10 @@ def task_analyse(self, episode_id: str, report_id: str) -> None:
     time_limit=1860,
 )
 def task_refine_boundaries(self, episode_id: str, report_id: str) -> None:
-    """Refine the outer edges of each ad break produced by `task_analyse` using
+    """WIP — not invoked by `queue_episode_for_clipping`. See the module
+    docstring on `app.services.refinement` for the rationale.
+
+    Refine the outer edges of each ad break produced by `task_analyse` using
     a Gemini audio model. For each break, sends a 20s window around each edge
     to the model and updates the timestamp with the model's exact offset. Edges
     that fall within SNAP_TO_EDGE_MS of episode start/end are snapped instead.
@@ -553,11 +556,14 @@ def queue_episode_for_clipping(
     else:
         assert clip_mode == ClipMode.AI, f"Unexpected clip_mode: {clip_mode}"
         transcription_queue = _get_transcription_queue(session)
+        # NOTE: task_refine_boundaries is intentionally NOT wired into this chain
+        # — boundary refinement is gated on offline eval results before being
+        # enabled in production. The task and its shared helper remain available
+        # for the eval pipeline (mode = "ai_refined") and for one-off invocation.
         pipeline = chain(
             task_download.si(episode.id, report.id),
             task_transcribe.si(episode.id, report.id).set(queue=transcription_queue),
             task_analyse.si(episode.id, report.id),
-            task_refine_boundaries.si(episode.id, report.id).set(queue="ai"),
             task_edit.si(episode.id, report.id),
         )
 
