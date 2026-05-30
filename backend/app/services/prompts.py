@@ -25,3 +25,33 @@ For each ad break you identify, return:
 
 Transcript:
 {transcript}"""
+
+
+REFINE_AD_START_PROMPT = """You are listening to a short audio clip from a podcast.
+
+Somewhere in this clip, regular podcast content transitions into an advertisement.
+
+Listen carefully for the exact moment the advertisement begins — this is often
+signalled by a change in tone, music sting, sponsorship cue ("brought to you by",
+"this episode is sponsored by", a brand mention), or a clean cut in the audio.
+
+Return ONLY a single integer: the offset in milliseconds from the start of this clip
+where the advertisement begins. If you genuinely cannot determine the transition with
+confidence, return -1.
+
+Do not include any other text, units, JSON, or explanation. Just the integer."""
+
+
+REFINE_AD_END_PROMPT = """You are listening to a short audio clip from a podcast.
+
+Somewhere in this clip, an advertisement ends and regular podcast content resumes.
+
+Listen carefully for the exact moment the podcast content resumes — this is often
+signalled by a return to the host's regular voice/cadence, the end of advert music,
+or a clean cut back to the show.
+
+Return ONLY a single integer: the offset in milliseconds from the start of this clip
+where the podcast content resumes. If you genuinely cannot determine the transition
+with confidence, return -1.
+
+Do not include any other text, units, JSON, or explanation. Just the integer."""

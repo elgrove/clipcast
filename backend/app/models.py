@@ -72,6 +72,28 @@ class AnalysisReport(PydanticBaseModel):
         return (end - start).total_seconds()
 
 
+class RefinementReport(PydanticBaseModel):
+    started_at: str | None = None
+    completed_at: str | None = None
+    provider: str | None = None
+    model_name: str | None = None
+    input_tokens: int | None = None
+    output_tokens: int | None = None
+    cost_usd: float | None = None
+    boundaries_refined: int = 0
+    boundaries_snapped: int = 0
+    boundaries_kept: int = 0
+    error: str | None = None
+
+    @property
+    def duration_seconds(self) -> float | None:
+        if not self.started_at or not self.completed_at:
+            return None
+        start = datetime.fromisoformat(self.started_at)
+        end = datetime.fromisoformat(self.completed_at)
+        return (end - start).total_seconds()
+
+
 # ── Enums ────────────────────────────────────────────────────────────────────
 
 
@@ -105,6 +127,7 @@ class ClippingStatus(StrEnum):
     DOWNLOADING = "downloading"
     TRANSCRIBING = "transcribing"
     ANALYSING = "analysing"
+    REFINING = "refining"
     EDITING = "editing"
     COMPLETED = "completed"
 
@@ -115,8 +138,9 @@ class ClippingStatus(StrEnum):
             ClippingStatus.DOWNLOADING: 1,
             ClippingStatus.TRANSCRIBING: 2,
             ClippingStatus.ANALYSING: 3,
-            ClippingStatus.EDITING: 4,
-            ClippingStatus.COMPLETED: 5,
+            ClippingStatus.REFINING: 4,
+            ClippingStatus.EDITING: 5,
+            ClippingStatus.COMPLETED: 6,
         }[self]
 
 
@@ -177,6 +201,7 @@ class AppConfig(SQLModel, table=True):
     id: str = Field(default="config", primary_key=True)
     transcription_model_id: str | None = Field(default=None, foreign_key="ai_models.id")
     analysis_model_id: str | None = Field(default=None, foreign_key="ai_models.id")
+    boundary_refinement_model_id: str | None = Field(default=None, foreign_key="ai_models.id")
     keep_raw_episodes: bool = Field(default=True)
 
     transcription_model: AIModel | None = Relationship(
@@ -187,6 +212,12 @@ class AppConfig(SQLModel, table=True):
     )
     analysis_model: AIModel | None = Relationship(
         sa_relationship_kwargs={"foreign_keys": "[AppConfig.analysis_model_id]", "lazy": "joined"}
+    )
+    boundary_refinement_model: AIModel | None = Relationship(
+        sa_relationship_kwargs={
+            "foreign_keys": "[AppConfig.boundary_refinement_model_id]",
+            "lazy": "joined",
+        }
     )
 
 
@@ -321,10 +352,12 @@ class ClippingReport(SQLModel, table=True):
     episode_id: str = Field(foreign_key="podcast_episodes.id")
     transcription_model_id: str | None = Field(default=None, foreign_key="ai_models.id")
     analysis_model_id: str | None = Field(default=None, foreign_key="ai_models.id")
+    refinement_model_id: str | None = Field(default=None, foreign_key="ai_models.id")
     queued_at: datetime = Field(default_factory=datetime.utcnow)
     downloaded_at: datetime | None = Field(default=None)
     transcribed_at: datetime | None = Field(default=None)
     analysed_at: datetime | None = Field(default=None)
+    refined_at: datetime | None = Field(default=None)
     edited_at: datetime | None = Field(default=None)
     logs: str = Field(default="", sa_column=Column(Text))
     exceptions_json: str = Field(default="[]", sa_column=Column("exceptions", Text))
@@ -333,6 +366,9 @@ class ClippingReport(SQLModel, table=True):
     )
     analysis_report_json: str | None = Field(
         default=None, sa_column=Column("analysis_report", Text)
+    )
+    refinement_report_json: str | None = Field(
+        default=None, sa_column=Column("refinement_report", Text)
     )
     celery_task_id: str = Field(default="")
 
@@ -344,8 +380,10 @@ class ClippingReport(SQLModel, table=True):
     def status(self) -> ClippingStatus:
         if self.edited_at:
             return ClippingStatus.COMPLETED
-        if self.analysed_at:
+        if self.refined_at:
             return ClippingStatus.EDITING
+        if self.analysed_at:
+            return ClippingStatus.REFINING
         if self.transcribed_at:
             return ClippingStatus.ANALYSING
         if self.downloaded_at:
@@ -385,6 +423,20 @@ class ClippingReport(SQLModel, table=True):
         import json
 
         self.analysis_report_json = json.dumps(value.model_dump()) if value else None
+
+    @property
+    def refinement_report(self) -> RefinementReport | None:
+        import json
+
+        if not self.refinement_report_json:
+            return None
+        return RefinementReport(**json.loads(self.refinement_report_json))
+
+    @refinement_report.setter
+    def refinement_report(self, value: RefinementReport | None) -> None:
+        import json
+
+        self.refinement_report_json = json.dumps(value.model_dump()) if value else None
 
     def append_log(self, message: str) -> None:
         import logging
@@ -458,14 +510,17 @@ class PodcastShowUpdate(PydanticBaseModel):
 class ConfigRead(PydanticBaseModel):
     transcription_model_id: str | None
     analysis_model_id: str | None
+    boundary_refinement_model_id: str | None = None
     keep_raw_episodes: bool = True
     transcription_model: "AIModelRead | None" = None
     analysis_model: "AIModelRead | None" = None
+    boundary_refinement_model: "AIModelRead | None" = None
 
 
 class ConfigUpdate(PydanticBaseModel):
     transcription_model_id: str | None = None
     analysis_model_id: str | None = None
+    boundary_refinement_model_id: str | None = None
     keep_raw_episodes: bool | None = None
 
 
@@ -534,6 +589,7 @@ class ClippingReportRead(PydanticBaseModel):
     downloaded_at: datetime | None
     transcribed_at: datetime | None
     analysed_at: datetime | None
+    refined_at: datetime | None
     edited_at: datetime | None
     logs: str
     exceptions: list[str]
@@ -549,9 +605,11 @@ class ClippingReportDetail(PydanticBaseModel):
     downloaded_at: datetime | None
     transcribed_at: datetime | None
     analysed_at: datetime | None
+    refined_at: datetime | None
     edited_at: datetime | None
     transcription_model: str | None = None
     analysis_model: str | None = None
+    refinement_model: str | None = None
     transcription_duration_s: float | None = None
     transcription_input_tokens: int | None = None
     transcription_output_tokens: int | None = None
@@ -562,6 +620,13 @@ class ClippingReportDetail(PydanticBaseModel):
     analysis_output_tokens: int | None = None
     analysis_cost: float | None = None
     ad_breaks_found: int | None = None
+    refinement_duration_s: float | None = None
+    refinement_input_tokens: int | None = None
+    refinement_output_tokens: int | None = None
+    refinement_cost: float | None = None
+    boundaries_refined: int | None = None
+    boundaries_snapped: int | None = None
+    boundaries_kept: int | None = None
     has_exceptions: bool = False
 
 

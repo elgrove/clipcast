@@ -44,9 +44,11 @@ export interface EpisodeListResponse {
 export interface Config {
 	transcription_model_id: string | null;
 	analysis_model_id: string | null;
+	boundary_refinement_model_id: string | null;
 	keep_raw_episodes: boolean;
 	transcription_model: AIModel | null;
 	analysis_model: AIModel | null;
+	boundary_refinement_model: AIModel | null;
 }
 
 export type ProviderKind =
@@ -92,6 +94,7 @@ export interface ClippingReport {
 	downloaded_at: string | null;
 	transcribed_at: string | null;
 	analysed_at: string | null;
+	refined_at: string | null;
 	edited_at: string | null;
 	logs: string;
 	exceptions: string[];
@@ -107,9 +110,11 @@ export interface ClippingReportDetail {
 	downloaded_at: string | null;
 	transcribed_at: string | null;
 	analysed_at: string | null;
+	refined_at: string | null;
 	edited_at: string | null;
 	transcription_model: string | null;
 	analysis_model: string | null;
+	refinement_model: string | null;
 	transcription_duration_s: number | null;
 	transcription_input_tokens: number | null;
 	transcription_output_tokens: number | null;
@@ -120,6 +125,13 @@ export interface ClippingReportDetail {
 	analysis_output_tokens: number | null;
 	analysis_cost: number | null;
 	ad_breaks_found: number | null;
+	refinement_duration_s: number | null;
+	refinement_input_tokens: number | null;
+	refinement_output_tokens: number | null;
+	refinement_cost: number | null;
+	boundaries_refined: number | null;
+	boundaries_snapped: number | null;
+	boundaries_kept: number | null;
 	has_exceptions: boolean;
 }
 

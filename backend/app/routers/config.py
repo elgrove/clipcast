@@ -46,12 +46,18 @@ def get_config(session: Session = Depends(get_session)):
     return ConfigRead(
         transcription_model_id=config.transcription_model_id,
         analysis_model_id=config.analysis_model_id,
+        boundary_refinement_model_id=config.boundary_refinement_model_id,
         keep_raw_episodes=config.keep_raw_episodes,
         transcription_model=(
             _ai_model_to_read(config.transcription_model) if config.transcription_model else None
         ),
         analysis_model=(
             _ai_model_to_read(config.analysis_model) if config.analysis_model else None
+        ),
+        boundary_refinement_model=(
+            _ai_model_to_read(config.boundary_refinement_model)
+            if config.boundary_refinement_model
+            else None
         ),
     )
 
@@ -81,6 +87,19 @@ def update_config(data: ConfigUpdate, session: Session = Depends(get_session)):
                     detail=f"Model '{model.name}' does not support analysis",
                 )
         config.analysis_model_id = data.analysis_model_id or None
+    if data.boundary_refinement_model_id is not None:
+        if data.boundary_refinement_model_id != "":
+            model = session.get(AIModel, data.boundary_refinement_model_id)
+            if not model:
+                raise HTTPException(
+                    status_code=422, detail="Boundary refinement model not found"
+                )
+            if model.provider.kind != Provider.GEMINI.value:
+                raise HTTPException(
+                    status_code=422,
+                    detail="Boundary refinement requires a Gemini model",
+                )
+        config.boundary_refinement_model_id = data.boundary_refinement_model_id or None
     if data.keep_raw_episodes is not None:
         config.keep_raw_episodes = data.keep_raw_episodes
     session.add(config)

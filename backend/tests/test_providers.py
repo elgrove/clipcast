@@ -317,3 +317,110 @@ def test_openai_compatible_base_is_reusable_without_openrouter_overrides(monkeyp
     assert _FakeOpenAI.last_init_kwargs["base_url"] == "https://api.example.test/v1"
     # No extra_body unless subclass opts in
     assert "extra_body" not in _FakeOpenAI.last_call_kwargs
+
+
+# ── parse_refinement_offset ──────────────────────────────────────────────────
+
+
+def test_parse_refinement_offset_bare_int():
+    from app.services.providers import parse_refinement_offset
+
+    assert parse_refinement_offset("1234") == 1234
+    assert parse_refinement_offset(" 1234 ") == 1234
+    assert parse_refinement_offset("0") == 0
+
+
+def test_parse_refinement_offset_json_shape():
+    from app.services.providers import parse_refinement_offset
+
+    assert parse_refinement_offset('{"offset_ms": 1234}') == 1234
+    assert parse_refinement_offset('{"offset_ms": "2345"}') == 2345
+
+
+def test_parse_refinement_offset_code_fenced():
+    from app.services.providers import parse_refinement_offset
+
+    assert parse_refinement_offset("```\n1234\n```") == 1234
+    assert parse_refinement_offset('```json\n{"offset_ms": 1234}\n```') == 1234
+
+
+def test_parse_refinement_offset_negative_returns_none():
+    from app.services.providers import parse_refinement_offset
+
+    assert parse_refinement_offset("-1") is None
+    assert parse_refinement_offset("-100") is None
+
+
+def test_parse_refinement_offset_unparseable_returns_none():
+    from app.services.providers import parse_refinement_offset
+
+    assert parse_refinement_offset(None) is None
+    assert parse_refinement_offset("") is None
+    assert parse_refinement_offset("   ") is None
+    assert parse_refinement_offset("I cannot determine the transition") is None
+    assert parse_refinement_offset('{"something_else": 5}') is None
+
+
+def test_parse_refinement_offset_extracts_number_from_prose():
+    """The model is told to return a bare int — but if it returns 'about 4500ms'
+    we should still recover the number rather than dropping the call."""
+    from app.services.providers import parse_refinement_offset
+
+    assert parse_refinement_offset("about 4500ms") == 4500
+    assert parse_refinement_offset("4500ms") == 4500
+
+
+# ── get_ai_provider for boundary_refinement ──────────────────────────────────
+
+
+def test_get_ai_provider_boundary_refinement_requires_gemini(session):
+    """Boundary refinement only supports Gemini; an OpenAI model on the
+    refinement slot must raise a clear ValueError."""
+    provider_row, model = _openai_pair(supports_analysis=True)
+    session.add(provider_row)
+    session.add(model)
+    session.commit()
+    session.refresh(model)
+
+    config = session.get(AppConfig, "config")
+    config.boundary_refinement_model_id = model.id
+    session.add(config)
+    session.commit()
+    session.refresh(config)
+
+    with pytest.raises(ValueError, match="Boundary refinement requires a Gemini model"):
+        get_ai_provider("boundary_refinement", config)
+
+
+def test_get_ai_provider_boundary_refinement_returns_gemini_provider(session):
+    from app.services.providers import GeminiProvider
+
+    provider_row = AIProvider(kind="gemini", name="Gemini", api_key="k")
+    model = AIModel(provider_id=provider_row.id, name="gemini-2.5-flash")
+    model.provider = provider_row
+    session.add(provider_row)
+    session.add(model)
+    session.commit()
+    session.refresh(model)
+
+    config = session.get(AppConfig, "config")
+    config.boundary_refinement_model_id = model.id
+    session.add(config)
+    session.commit()
+    session.refresh(config)
+
+    provider = get_ai_provider("boundary_refinement", config)
+    assert isinstance(provider, GeminiProvider)
+    assert provider.model_config.name == "gemini-2.5-flash"
+
+
+def test_get_ai_provider_boundary_refinement_requires_configured_model(session):
+    """No refinement model on the AppConfig → ValueError."""
+    config = session.get(AppConfig, "config")
+    config.boundary_refinement_model_id = None
+    session.add(config)
+    session.commit()
+    session.refresh(config)
+
+    with pytest.raises(ValueError, match="No boundary refinement model configured"):
+        get_ai_provider("boundary_refinement", config)

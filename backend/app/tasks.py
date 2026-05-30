@@ -1,12 +1,17 @@
 import json
 import logging
+import os
+import tempfile
 from datetime import datetime, timedelta
+from pathlib import Path
 
 from celery import chain
+from pydub import AudioSegment
 from sqlmodel import Session, select
 
 from app.database import engine
 from app.models import (
+    AdBreak,
     AnalysisReport,
     AppConfig,
     ClipMode,
@@ -14,15 +19,20 @@ from app.models import (
     PodcastEpisode,
     PodcastShow,
     Provider,
+    RefinementReport,
     TranscriptionReport,
 )
 from app.services.download import download_episode
-from app.services.editor import edit_episode
+from app.services.editor import edit_episode, format_ms_to_time, parse_time_to_ms
+from app.services.providers import get_ai_provider
 from app.worker import celery_app
 
 logger = logging.getLogger("clipcast")
 
 STALE_REPORT_THRESHOLD = timedelta(hours=4)
+
+SNAP_TO_EDGE_MS = 5000  # snap an outer ad-break edge to 0 / episode-end if within this gap
+REFINEMENT_WINDOW_MS = 10_000  # ±10s around the analysed boundary → 20s symmetric window
 
 
 def _update_report(report_id: str, **fields) -> None:
@@ -247,6 +257,228 @@ def task_analyse(self, episode_id: str, report_id: str) -> None:
 
 
 @celery_app.task(
+    name="app.tasks.task_refine_boundaries",
+    bind=True,
+    max_retries=3,
+    default_retry_delay=30,
+    autoretry_for=(Exception,),
+    retry_backoff=True,
+    retry_backoff_max=300,
+    soft_time_limit=1800,
+    time_limit=1860,
+)
+def task_refine_boundaries(self, episode_id: str, report_id: str) -> None:
+    """Refine the outer edges of each ad break produced by `task_analyse` using
+    a Gemini audio model. For each break, sends a 20s window around each edge
+    to the model and updates the timestamp with the model's exact offset. Edges
+    that fall within SNAP_TO_EDGE_MS of episode start/end are snapped instead.
+    Inner advert boundaries within a break are preserved unchanged — only the
+    outer cut points matter for editing.
+
+    Opt-in: if no boundary_refinement_model is configured, this task no-ops and
+    leaves the analysed timestamps untouched."""
+    with Session(engine) as session:
+        report = session.get(ClippingReport, report_id)
+        if report and report.refined_at:
+            _log_report(report_id, "Boundaries already refined, skipping")
+            return
+
+        episode = session.get(PodcastEpisode, episode_id)
+        if not episode:
+            raise ValueError(f"Episode not found: {episode_id}")
+
+        breaks = list(episode.ad_breaks)
+        if not breaks:
+            _log_report(report_id, "No ad breaks to refine — skipping refinement step")
+            _update_report(report_id, refined_at=datetime.utcnow())
+            return
+
+        config = session.get(AppConfig, "config")
+        if not config or not config.boundary_refinement_model:
+            _log_report(
+                report_id,
+                "Boundary refinement skipped — no refinement model configured",
+            )
+            _update_report(report_id, refined_at=datetime.utcnow())
+            return
+
+        try:
+            provider = get_ai_provider("boundary_refinement", config)
+        except ValueError as e:
+            _log_report(report_id, f"Boundary refinement skipped — {e}")
+            _update_report(report_id, refined_at=datetime.utcnow())
+            return
+
+        refinement_model_id = config.boundary_refinement_model_id
+        refinement_model_name = config.boundary_refinement_model.name
+        refinement_provider_name = config.boundary_refinement_model.provider.kind
+        audio_path = episode.mp3_path
+        ad_breaks_path = episode.ad_breaks_path
+
+    _update_report(report_id, refinement_model_id=refinement_model_id)
+    _log_report(report_id, f"Refining outer edges of {len(breaks)} ad break(s)...")
+
+    refinement_report = RefinementReport(
+        started_at=datetime.utcnow().isoformat(),
+        provider=refinement_provider_name,
+        model_name=refinement_model_name,
+    )
+
+    refined_breaks: list[AdBreak] = []
+    try:
+        with open(audio_path, "rb") as fh:
+            audio = AudioSegment.from_file(fh, format="mp3")
+        episode_duration_ms = len(audio)
+
+        for index, ad_break in enumerate(breaks, start=1):
+            break_start_ms = parse_time_to_ms(ad_break.start_time)
+            break_end_ms = parse_time_to_ms(ad_break.end_time)
+
+            new_start_ms = _refine_or_snap_boundary(
+                audio=audio,
+                episode_duration_ms=episode_duration_ms,
+                break_index=index,
+                boundary_ms=break_start_ms,
+                direction="ad_start",
+                provider=provider,
+                report_id=report_id,
+                refinement_report=refinement_report,
+            )
+            new_end_ms = _refine_or_snap_boundary(
+                audio=audio,
+                episode_duration_ms=episode_duration_ms,
+                break_index=index,
+                boundary_ms=break_end_ms,
+                direction="ad_end",
+                provider=provider,
+                report_id=report_id,
+                refinement_report=refinement_report,
+            )
+
+            if new_end_ms <= new_start_ms:
+                _log_report(
+                    report_id,
+                    f"Break {index}: refined edges collapsed ({new_start_ms}→{new_end_ms}), "
+                    "keeping original timestamps",
+                )
+                refined_breaks.append(ad_break)
+                continue
+
+            refined_breaks.append(
+                AdBreak(
+                    start_time=format_ms_to_time(new_start_ms),
+                    end_time=format_ms_to_time(new_end_ms),
+                    adverts=ad_break.adverts,
+                )
+            )
+
+        refinement_report.completed_at = datetime.utcnow().isoformat()
+    except Exception as e:
+        refinement_report.error = str(e)
+        with Session(engine) as session:
+            report = session.get(ClippingReport, report_id)
+            report.refinement_report = refinement_report
+            report.add_exception(e)
+            report.append_log(f"Boundary refinement failed: {e}")
+            session.add(report)
+            session.commit()
+        raise
+
+    with Session(engine) as session:
+        episode = session.get(PodcastEpisode, episode_id)
+        episode.ad_breaks = refined_breaks
+        session.add(episode)
+        session.commit()
+
+        report = session.get(ClippingReport, report_id)
+        report.refinement_report = refinement_report
+        report.refined_at = datetime.utcnow()
+        report.append_log(
+            f"Refinement complete — refined {refinement_report.boundaries_refined}, "
+            f"snapped {refinement_report.boundaries_snapped}, "
+            f"kept {refinement_report.boundaries_kept}"
+        )
+        session.add(report)
+        session.commit()
+
+    ad_breaks_path.write_text(
+        json.dumps({"breaks": [b.model_dump() for b in refined_breaks]}, indent=2)
+    )
+
+
+def _refine_or_snap_boundary(
+    *,
+    audio,
+    episode_duration_ms: int,
+    break_index: int,
+    boundary_ms: int,
+    direction: str,
+    provider,
+    report_id: str,
+    refinement_report: RefinementReport,
+) -> int:
+    """Decide whether to snap, refine, or keep a single boundary. Returns the
+    new (or unchanged) boundary in absolute ms. Mutates `refinement_report`
+    counters and appends per-boundary outcomes to the report log."""
+    is_outer_edge = (direction == "ad_start" and boundary_ms < SNAP_TO_EDGE_MS) or (
+        direction == "ad_end" and (episode_duration_ms - boundary_ms) < SNAP_TO_EDGE_MS
+    )
+    if is_outer_edge:
+        snapped_ms = 0 if direction == "ad_start" else episode_duration_ms
+        refinement_report.boundaries_snapped += 1
+        _log_report(
+            report_id,
+            f"Break {break_index} {direction}: snapped {format_ms_to_time(boundary_ms)} → "
+            f"{format_ms_to_time(snapped_ms)} (within {SNAP_TO_EDGE_MS}ms of episode edge)",
+        )
+        return snapped_ms
+
+    window_start_ms = max(0, boundary_ms - REFINEMENT_WINDOW_MS)
+    window_end_ms = min(episode_duration_ms, boundary_ms + REFINEMENT_WINDOW_MS)
+    if window_end_ms <= window_start_ms:
+        refinement_report.boundaries_kept += 1
+        _log_report(
+            report_id,
+            f"Break {break_index} {direction}: window collapsed, keeping original boundary",
+        )
+        return boundary_ms
+
+    window_audio = audio[window_start_ms:window_end_ms]
+    temp_fd, temp_path_str = tempfile.mkstemp(suffix=".mp3")
+    temp_path = Path(temp_path_str)
+    os.close(temp_fd)
+    try:
+        window_audio.export(temp_path, format="mp3")
+        offset_in_window = provider.refine_boundary(
+            audio_path=temp_path,
+            direction=direction,
+            report=refinement_report,
+        )
+    finally:
+        if temp_path.exists():
+            temp_path.unlink()
+
+    window_length_ms = window_end_ms - window_start_ms
+    if offset_in_window is None or offset_in_window > window_length_ms:
+        refinement_report.boundaries_kept += 1
+        _log_report(
+            report_id,
+            f"Break {break_index} {direction}: model could not determine boundary "
+            f"(returned {offset_in_window!r}), keeping original",
+        )
+        return boundary_ms
+
+    refined_ms = window_start_ms + offset_in_window
+    refinement_report.boundaries_refined += 1
+    _log_report(
+        report_id,
+        f"Break {break_index} {direction}: refined {format_ms_to_time(boundary_ms)} → "
+        f"{format_ms_to_time(refined_ms)}",
+    )
+    return refined_ms
+
+
+@celery_app.task(
     name="app.tasks.task_edit",
     bind=True,
     max_retries=3,
@@ -399,6 +631,7 @@ def queue_episode_for_clipping(
             task_download.si(episode.id, report.id),
             task_transcribe.si(episode.id, report.id).set(queue=transcription_queue),
             task_analyse.si(episode.id, report.id),
+            task_refine_boundaries.si(episode.id, report.id).set(queue="ai"),
             task_edit.si(episode.id, report.id),
         )
 

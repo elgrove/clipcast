@@ -4,7 +4,7 @@ import re
 from abc import ABC, abstractmethod
 from decimal import Decimal
 from pathlib import Path
-from typing import ClassVar
+from typing import ClassVar, Literal
 
 import requests
 from google import genai
@@ -20,15 +20,22 @@ from app.models import (
     AnalysisReport,
     AppConfig,
     Provider,
+    RefinementReport,
     TranscriptionReport,
     TranscriptionSegment,
 )
-from app.services.prompts import ANALYSE_AD_BREAKS_PROMPT, TRANSCRIBE_AUDIO_PROMPT
+from app.services.prompts import (
+    ANALYSE_AD_BREAKS_PROMPT,
+    REFINE_AD_END_PROMPT,
+    REFINE_AD_START_PROMPT,
+    TRANSCRIBE_AUDIO_PROMPT,
+)
 
 logger = logging.getLogger(__name__)
 
 TRANSCRIPTION_TIMEOUT = 14400  # 4 hours — CPU whisper can be very slow
 ANALYSIS_TIMEOUT = 300  # 5 minutes
+REFINEMENT_TIMEOUT = 120  # 2 minutes — short audio window, quick response expected
 
 
 class Transcription(PydanticBaseModel):
@@ -206,6 +213,93 @@ class GeminiProvider(AIProviderBase):
         text = self._strip_code_fences(response.text)
         parsed = AdBreaksResponse.model_validate(json.loads(text))
         return _response_to_ad_breaks(parsed)
+
+    def refine_boundary(
+        self,
+        audio_path: Path,
+        direction: Literal["ad_start", "ad_end"],
+        report: RefinementReport = None,
+    ) -> int | None:
+        """Send a short audio window to Gemini and ask for the exact ms offset of
+        the content↔ad transition. Returns the offset within the window in ms,
+        or None if the model couldn't determine it (or returned an unparseable
+        response). The caller is responsible for converting the offset back to
+        absolute episode time and clamping out-of-window responses."""
+        logger.info(
+            "Refining %s boundary with Gemini model %s", direction, self.model_config.name
+        )
+
+        client = genai.Client(
+            api_key=self.api_key,
+            http_options=types.HttpOptions(timeout=REFINEMENT_TIMEOUT * 1000),
+        )
+        audio_file = client.files.upload(file=audio_path)
+
+        prompt = REFINE_AD_START_PROMPT if direction == "ad_start" else REFINE_AD_END_PROMPT
+
+        response = client.models.generate_content(
+            model=self.model_config.name,
+            contents=[audio_file, prompt],
+        )
+
+        if report is not None and response.usage_metadata:
+            input_tokens = getattr(response.usage_metadata, "prompt_token_count", 0) or 0
+            total_tokens = getattr(response.usage_metadata, "total_token_count", 0) or 0
+            output_tokens = total_tokens - input_tokens
+            report.input_tokens = (report.input_tokens or 0) + input_tokens
+            report.output_tokens = (report.output_tokens or 0) + output_tokens
+            call_cost = self.calculate_cost(input_tokens, output_tokens, self.model_config)
+            report.cost_usd = (report.cost_usd or 0.0) + call_cost
+
+        return parse_refinement_offset(response.text)
+
+
+def parse_refinement_offset(raw: str | None) -> int | None:
+    """Best-effort parse of the refinement model's response into a ms offset.
+
+    Accepts: bare integer ("1234"), JSON shapes ({"offset_ms": 1234}), code-fenced
+    integers, or strings containing only the number. Returns None for -1, missing,
+    unparseable, or negative values."""
+    if raw is None:
+        return None
+    text = raw.strip()
+    if not text:
+        return None
+
+    if text.startswith("```"):
+        text = re.sub(r"^```(?:json)?\n?", "", text)
+        text = re.sub(r"\n?```$", "", text).strip()
+
+    try:
+        value = int(text)
+    except ValueError:
+        try:
+            parsed = json.loads(text)
+        except (ValueError, json.JSONDecodeError):
+            match = re.search(r"-?\d+", text)
+            if not match:
+                return None
+            try:
+                value = int(match.group(0))
+            except ValueError:
+                return None
+        else:
+            if isinstance(parsed, int):
+                value = parsed
+            elif isinstance(parsed, dict):
+                raw_value = parsed.get("offset_ms")
+                if raw_value is None:
+                    return None
+                try:
+                    value = int(raw_value)
+                except (TypeError, ValueError):
+                    return None
+            else:
+                return None
+
+    if value < 0:
+        return None
+    return value
 
 
 class WhisperProvider(AIProviderBase):
@@ -389,23 +483,35 @@ class OpenRouterProvider(OpenAICompatibleProvider):
 
 
 def get_ai_provider(task_type: str, config: AppConfig) -> AIProviderBase:
-    if task_type not in ("transcription", "analysis"):
-        raise ValueError(f"Invalid task_type: {task_type}. Must be 'transcription' or 'analysis'")
+    if task_type not in ("transcription", "analysis", "boundary_refinement"):
+        raise ValueError(
+            f"Invalid task_type: {task_type}. "
+            "Must be 'transcription', 'analysis', or 'boundary_refinement'"
+        )
 
     if task_type == "transcription":
         model_config = config.transcription_model
         if not model_config:
             raise ValueError("No transcription model configured")
-    else:
+    elif task_type == "analysis":
         model_config = config.analysis_model
         if not model_config:
             raise ValueError("No analysis model configured")
+    else:
+        model_config = config.boundary_refinement_model
+        if not model_config:
+            raise ValueError("No boundary refinement model configured")
 
     provider_config = model_config.provider
     provider_kind = Provider(provider_config.kind)
 
     if task_type == "analysis" and provider_kind == Provider.WHISPER_CPP:
         raise ValueError("Whisper.cpp does not support analysis, only transcription")
+
+    if task_type == "boundary_refinement" and provider_kind != Provider.GEMINI:
+        raise ValueError(
+            f"Boundary refinement requires a Gemini model; got provider '{provider_kind}'"
+        )
 
     if provider_kind == Provider.GEMINI:
         return GeminiProvider(provider_config=provider_config, model_config=model_config)
