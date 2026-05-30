@@ -2,9 +2,11 @@ import logging
 from collections.abc import Generator
 from pathlib import Path
 
+from alembic.autogenerate import compare_metadata
 from alembic.config import Config
+from alembic.runtime.migration import MigrationContext
 from sqlalchemy import inspect
-from sqlmodel import Session, create_engine
+from sqlmodel import Session, SQLModel, create_engine
 
 from alembic import command
 from app.config import settings
@@ -44,8 +46,34 @@ def apply_migrations() -> None:
     logger.info("Database migrations applied")
 
 
+def _check_schema_drift() -> None:
+    """Compare the live DB schema against `SQLModel.metadata` and log at
+    ERROR level if they diverge.
+
+    The expected post-`alembic upgrade head` state is zero diff. A non-empty
+    diff means a model change merged without a paired migration (see
+    `Working with Alembic` in CLAUDE.md). The app is still allowed to boot
+    so the operator can inspect; the broken queries will surface as ORM
+    errors with the column / table name attached."""
+    import app.models  # noqa: F401 — ensure metadata is populated
+
+    with engine.connect() as conn:
+        ctx = MigrationContext.configure(conn)
+        diff = compare_metadata(ctx, SQLModel.metadata)
+
+    if diff:
+        logger.error(
+            "Schema drift after `alembic upgrade head` — live DB does not "
+            "match SQLModel.metadata. Most likely a schema-affecting model "
+            "change merged without a paired migration. Generate one with "
+            "`uv run alembic revision --autogenerate -m '...'`. Diff: %r",
+            diff,
+        )
+
+
 def init_db() -> None:
     apply_migrations()
+    _check_schema_drift()
     with engine.connect() as conn:
         conn.exec_driver_sql("PRAGMA journal_mode=WAL")
         conn.commit()
