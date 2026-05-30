@@ -8,15 +8,19 @@ A *run* is declared as a TOML file under `evals/runs/`. Each run:
 
 - references one or more fixture cases (episodes),
 - declares one or more AI models to evaluate,
-- carries per-podcast settings (custom prompt, `use_acast` on/off),
+- carries per-podcast settings (custom prompt, `mode`, optional `refinement_model`),
 - writes a JSON report to `evals/reports/` and prints a per-model table.
 
-There is one eval pipeline. Per case it either:
+Per case the pipeline runs in one of three **modes**:
 
-- runs **AI analysis** on the transcript with the configured model and
-  `custom_prompt`, yielding cut regions = the AI-detected ads; or
-- runs **Acast marker detection** on the audio (`detect_idents` →
-  `pair_idents`), yielding cut regions = the Acast bracket spans.
+- **`ai`** — AI analysis on the transcript with the configured model and
+  `custom_prompt`. Cut regions = AI-detected ad breaks. (Text-only, the default.)
+- **`ai_refined`** — same AI analysis, then each break's outer edges are
+  refined by sending a ±10s audio window to a Gemini model (mirrors
+  `task_refine_boundaries`). Requires a `refinement_model` and an `audio.mp3`
+  in the fixture.
+- **`acast`** — Acast marker detection on the audio (`detect_idents` →
+  `pair_idents`). Cut regions = the Acast bracket spans. No AI model used.
 
 (Per the real pipeline in `tasks.py`, the AI analysis-inside-acast-brackets
 step is reporting-only and does not influence cut regions, so it is not
@@ -58,9 +62,10 @@ git-ignored.
 [run]
 name = "three-podcasts-baseline"   # default: file stem
 iou_threshold = 0.5                # default: 0.5
-use_acast = false                  # default for [[cases]] below
+mode = "ai"                        # default mode for [[cases]] below
+refinement_model = { spec = "gemini:gemini-2.5-flash" }  # used by any ai_refined case
 
-# Models to evaluate. Each [[models]] block declares one model.
+# Analysis models to bake off. Each [[models]] block declares one model.
 # Either `spec = "provider:model"` or split `provider`/`model`.
 [[models]]
 spec = "gemini:gemini-2.5-flash"
@@ -81,11 +86,13 @@ introduction is likely an ad.
 [[cases]]
 id = "tff-2026-01-09"
 podcast = "Totally Football"
-use_acast = true                   # per-case override
+mode = "acast"                     # per-case override
 
 [[cases]]
 id = "fof-2026-01-05"
 podcast = "Footballers on Football"
+mode = "ai_refined"                                          # AI then audio-refinement
+refinement_model = { spec = "gemini:gemini-2.5-pro" }        # per-case override
 iou_threshold = 0.75               # tighter matching for this case
 ```
 
@@ -95,7 +102,8 @@ iou_threshold = 0.75               # tighter matching for this case
 |--------------------------|---------|---------------|---------------------------------------------|
 | `name`                   | string  | file stem     | Used in the report filename                 |
 | `iou_threshold`          | float   | `0.5`         | Default IoU for matching                    |
-| `use_acast`              | bool    | `false`       | Default `use_acast` for cases below         |
+| `mode`                   | string  | `"ai"`        | Default mode: `ai`, `ai_refined`, `acast`   |
+| `refinement_model`       | table   | none          | `{ spec = "provider:model" }` for `ai_refined` cases |
 | `break_cluster_gap_s`    | float   | `5.0`         | Max gap (s) for merging ads into one break  |
 
 | `[[models]]`       | Type    | Required      | Notes                                       |
@@ -108,20 +116,22 @@ iou_threshold = 0.75               # tighter matching for this case
 |--------------------------|---------|---------------|---------------------------------------------|
 | `id`                     | string  | yes           | Must match `evals/fixtures/<id>/`           |
 | `podcast`                | string  | no            | Informational                               |
-| `custom_prompt`          | string  | no            | Per-case AI instructions (AI mode only)     |
-| `use_acast`              | bool    | no            | Overrides `[run].use_acast`                 |
+| `custom_prompt`          | string  | no            | Per-case AI instructions (`ai`/`ai_refined`) |
+| `mode`                   | string  | no            | Overrides `[run].mode`                      |
+| `refinement_model`       | table   | no            | Overrides `[run].refinement_model`          |
 | `iou_threshold`          | float   | no            | Overrides `[run].iou_threshold`             |
 | `break_cluster_gap_s`    | float   | no            | Overrides `[run].break_cluster_gap_s`       |
 
-Unknown keys are rejected so typos surface early.
+Unknown keys are rejected so typos surface early. `use_acast` is no longer
+supported — use `mode = "acast"` instead.
 
 ## Fixture layout
 
 ```
 evals/fixtures/<case-id>/
   meta.json             # podcast, episode_title, notes (informational)
-  transcription.json    # list[TranscriptionSegment] — needed when use_acast=false
-  audio.mp3             # needed when use_acast=true
+  transcription.json    # list[TranscriptionSegment] — needed for ai / ai_refined
+  audio.mp3             # needed for acast and for ai_refined (refinement windows)
   expected.json         # list of expected regions (per-advert) — ground truth
 ```
 
@@ -177,7 +187,7 @@ episode under `../_podcasts/<show>/`:
    `adverts` into per-advert expected entries and hand-edit to correct any
    errors. Save as `expected.json`.
 3. Copy or symlink the source audio in as `audio.mp3` if the case will be
-   evaluated with `use_acast = true`.
+   evaluated with `mode = "acast"` or `mode = "ai_refined"`.
 4. Fill in `meta.json`.
 
 ## Metrics

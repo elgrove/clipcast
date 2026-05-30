@@ -4,15 +4,20 @@ import json
 import time
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
+
+from pydub import AudioSegment
 
 from app.models import (
     AdBreak,
     AnalysisReport,
+    RefinementReport,
     TranscriptionSegment,
 )
 from app.services.acast import detect_idents, idents_to_ad_breaks, pair_idents
 from app.services.analysis import analyse_transcription
+from app.services.editor import format_ms_to_time, parse_time_to_ms
+from app.services.refinement import refine_or_snap_boundary
 
 from .metrics import (
     Interval,
@@ -23,6 +28,8 @@ from .metrics import (
     parse_time,
 )
 from .providers import ModelSpec, build_provider
+
+EvalMode = Literal["ai", "ai_refined", "acast"]
 
 ACAST_BREAK_LABEL = "Acast ad break"
 FIXTURES_DIR = Path(__file__).parent / "fixtures"
@@ -180,10 +187,11 @@ class NameMatch:
 class PipelineResult:
     case_id: str
     iou_threshold: float
-    use_acast: bool
+    mode: EvalMode
     break_cluster_gap_s: float = 5.0
     model: str | None = None
     provider: str | None = None
+    refinement_model: str | None = None
     predicted: list[dict[str, Any]] = field(default_factory=list)
     expected: list[dict[str, Any]] = field(default_factory=list)
     # Ad-level metrics — granular per-advert scoring
@@ -223,23 +231,31 @@ class PipelineResult:
     cost_usd: float | None = None
     input_tokens: int | None = None
     output_tokens: int | None = None
+    refinement_cost_usd: float | None = None
+    refinement_input_tokens: int | None = None
+    refinement_output_tokens: int | None = None
+    boundaries_refined: int | None = None
+    boundaries_snapped: int | None = None
+    boundaries_kept: int | None = None
     duration_seconds: float | None = None
     error: str | None = None
 
 
 def _produce_ad_breaks(
     case: EvalCase,
-    use_acast: bool,
+    mode: EvalMode,
     model: ModelSpec | None,
+    refinement_model: ModelSpec | None,
     custom_prompt: str | None,
     result: PipelineResult,
 ) -> list[AdBreak]:
     """Reproduce the clipping pipeline for one case.
 
-    When use_acast is true the breaks come from ident detection (no inner
-    advert detail). Otherwise the breaks come from AI analysis (with inner
-    adverts populated)."""
-    if use_acast:
+    - ``acast``: breaks come from ident detection (no inner advert detail).
+    - ``ai``: breaks come from AI text analysis.
+    - ``ai_refined``: AI breaks, then each outer edge is refined by sending a
+      short audio window to a refinement model — mirrors task_refine_boundaries."""
+    if mode == "acast":
         audio_path = case.require_audio()
         idents, audio_duration = detect_idents(audio_path)
         pairs, unpaired = pair_idents(idents, audio_duration=audio_duration)
@@ -249,7 +265,7 @@ def _produce_ad_breaks(
         return idents_to_ad_breaks(pairs)
 
     if model is None:
-        raise ValueError("A model is required when use_acast=false")
+        raise ValueError(f"A model is required for mode={mode!r}")
 
     transcription = case.load_transcription()
     provider = build_provider(model)
@@ -263,7 +279,69 @@ def _produce_ad_breaks(
     result.cost_usd = report.cost_usd
     result.input_tokens = report.input_tokens
     result.output_tokens = report.output_tokens
-    return breaks
+
+    if mode == "ai":
+        return breaks
+
+    if refinement_model is None:
+        raise ValueError("A refinement_model is required for mode='ai_refined'")
+    if not breaks:
+        return []
+
+    audio_path = case.require_audio()
+    audio = AudioSegment.from_file(audio_path)
+    episode_duration_ms = len(audio)
+
+    refinement_provider = build_provider(refinement_model)
+    refinement_report = RefinementReport(
+        provider=refinement_model.provider,
+        model_name=refinement_model.model,
+    )
+
+    refined: list[AdBreak] = []
+    for index, br in enumerate(breaks, start=1):
+        start_ms = parse_time_to_ms(br.start_time)
+        end_ms = parse_time_to_ms(br.end_time)
+
+        new_start_ms = refine_or_snap_boundary(
+            audio=audio,
+            episode_duration_ms=episode_duration_ms,
+            break_index=index,
+            boundary_ms=start_ms,
+            direction="ad_start",
+            provider=refinement_provider,
+            refinement_report=refinement_report,
+        )
+        new_end_ms = refine_or_snap_boundary(
+            audio=audio,
+            episode_duration_ms=episode_duration_ms,
+            break_index=index,
+            boundary_ms=end_ms,
+            direction="ad_end",
+            provider=refinement_provider,
+            refinement_report=refinement_report,
+        )
+
+        if new_end_ms <= new_start_ms:
+            refined.append(br)
+            continue
+
+        refined.append(
+            AdBreak(
+                start_time=format_ms_to_time(new_start_ms),
+                end_time=format_ms_to_time(new_end_ms),
+                adverts=br.adverts,
+            )
+        )
+
+    result.refinement_model = refinement_model.label
+    result.refinement_cost_usd = refinement_report.cost_usd
+    result.refinement_input_tokens = refinement_report.input_tokens
+    result.refinement_output_tokens = refinement_report.output_tokens
+    result.boundaries_refined = refinement_report.boundaries_refined
+    result.boundaries_snapped = refinement_report.boundaries_snapped
+    result.boundaries_kept = refinement_report.boundaries_kept
+    return refined
 
 
 def _interval_to_dict(iv: Interval) -> dict[str, Any]:
@@ -362,8 +440,9 @@ def _tiered_score(
 def run_case(
     case: EvalCase,
     *,
-    use_acast: bool,
+    mode: EvalMode,
     model: ModelSpec | None = None,
+    refinement_model: ModelSpec | None = None,
     custom_prompt: str | None = None,
     iou_threshold: float = 0.5,
     break_cluster_gap_s: float = 5.0,
@@ -371,16 +450,19 @@ def run_case(
     result = PipelineResult(
         case_id=case.case_id,
         iou_threshold=iou_threshold,
-        use_acast=use_acast,
+        mode=mode,
         break_cluster_gap_s=break_cluster_gap_s,
         model=model.label if model else None,
-        provider=model.provider if model else ("acast" if use_acast else None),
+        provider=model.provider if model else ("acast" if mode == "acast" else None),
+        refinement_model=refinement_model.label if refinement_model else None,
         expected=[_expected_to_dict(e) for e in case.expected],
     )
 
     started = time.monotonic()
     try:
-        predicted_breaks = _produce_ad_breaks(case, use_acast, model, custom_prompt, result)
+        predicted_breaks = _produce_ad_breaks(
+            case, mode, model, refinement_model, custom_prompt, result
+        )
     except Exception as exc:
         result.error = f"{type(exc).__name__}: {exc}"
         result.duration_seconds = time.monotonic() - started

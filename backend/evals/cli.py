@@ -86,13 +86,27 @@ def _print_model_run(m: run.ModelRunSummary) -> None:
         f"Break-level P: {_fmt_pct(m.break_precision)}  R: {_fmt_pct(m.break_recall)}  "
         f"F1: {_fmt_pct(m.break_f1)}"
     )
-    cost_str = f"${m.total_cost_usd:.4f}" if m.total_cost_usd else "$0.0000"
-    print(
-        f"Total cost: {cost_str}  "
-        f"Tokens in/out: {_fmt_tokens(m.total_input_tokens)}/"
-        f"{_fmt_tokens(m.total_output_tokens)}  "
-        f"Total time: {m.total_duration_s:.1f}s"
-    )
+    if m.total_refinement_cost_usd or m.total_boundaries_refined or m.total_boundaries_snapped:
+        analysis_str = f"${m.total_cost_usd:.4f}" if m.total_cost_usd else "$0.0000"
+        refinement_str = (
+            f"${m.total_refinement_cost_usd:.4f}" if m.total_refinement_cost_usd else "$0.0000"
+        )
+        combined = (m.total_cost_usd or 0.0) + (m.total_refinement_cost_usd or 0.0)
+        print(
+            f"Total cost: ${combined:.4f} "
+            f"(analysis {analysis_str} + refinement {refinement_str})  "
+            f"Tokens in/out: {_fmt_tokens(m.total_input_tokens)}/"
+            f"{_fmt_tokens(m.total_output_tokens)}  "
+            f"Total time: {m.total_duration_s:.1f}s"
+        )
+    else:
+        cost_str = f"${m.total_cost_usd:.4f}" if m.total_cost_usd else "$0.0000"
+        print(
+            f"Total cost: {cost_str}  "
+            f"Tokens in/out: {_fmt_tokens(m.total_input_tokens)}/"
+            f"{_fmt_tokens(m.total_output_tokens)}  "
+            f"Total time: {m.total_duration_s:.1f}s"
+        )
 
     headers = [
         "case",
@@ -112,11 +126,10 @@ def _print_model_run(m: run.ModelRunSummary) -> None:
     ]
     rows = []
     for r in m.results:
-        mode = "acast" if r.use_acast else "ai"
         rows.append(
             [
                 r.case_id,
-                mode,
+                r.mode,
                 _fmt_pct(r.precision),
                 _fmt_pct(r.recall),
                 _fmt_pct(r.f1),
@@ -132,6 +145,25 @@ def _print_model_run(m: run.ModelRunSummary) -> None:
             ]
         )
     _print_table(headers, rows)
+
+    refined_results = [r for r in m.results if r.mode == "ai_refined"]
+    if refined_results:
+        print("\nrefinement diagnostics:")
+        ref_headers = ["case", "refined", "snapped", "kept", "ref-in", "ref-out", "ref-$"]
+        ref_rows = []
+        for r in refined_results:
+            ref_rows.append(
+                [
+                    r.case_id,
+                    str(r.boundaries_refined or 0),
+                    str(r.boundaries_snapped or 0),
+                    str(r.boundaries_kept or 0),
+                    _fmt_tokens(r.refinement_input_tokens),
+                    _fmt_tokens(r.refinement_output_tokens),
+                    _fmt_float(r.refinement_cost_usd, 4),
+                ]
+            )
+        _print_table(ref_headers, ref_rows)
 
     for r in m.results:
         if r.error:
@@ -196,12 +228,17 @@ def _cmd_run(args: argparse.Namespace) -> int:
 
     print(
         f"Run: {config.name}  IoU≥{config.iou_threshold}  "
-        f"use_acast default={config.use_acast_default}"
+        f"mode default={config.mode_default}"
     )
+    mode_counts = {
+        "ai": sum(1 for c in config.cases if c.mode == "ai"),
+        "ai_refined": sum(1 for c in config.cases if c.mode == "ai_refined"),
+        "acast": sum(1 for c in config.cases if c.mode == "acast"),
+    }
     print(
         f"Models: {len(config.models)}  Cases: {len(config.cases)} "
-        f"(ai: {sum(1 for c in config.cases if not c.use_acast)}, "
-        f"acast: {sum(1 for c in config.cases if c.use_acast)})"
+        f"(ai: {mode_counts['ai']}, ai_refined: {mode_counts['ai_refined']}, "
+        f"acast: {mode_counts['acast']})"
     )
 
     summary = run.execute_run(config)

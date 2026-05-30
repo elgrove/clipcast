@@ -125,7 +125,9 @@ class _StubProvider:
 
 
 def _patch_provider(monkeypatch, stub: _StubProvider):
-    """Patch get_ai_provider to return the stub when called for refinement."""
+    """Patch get_ai_provider in both call sites — tasks.py imports it at the
+    top, and the shared refinement helper resolves the concrete provider via
+    its caller, so just patching one is enough in practice."""
 
     def _factory(task_type, _config):
         if task_type != "boundary_refinement":
