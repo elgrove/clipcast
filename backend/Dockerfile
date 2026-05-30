@@ -21,6 +21,8 @@ COPY backend/pyproject.toml backend/uv.lock backend/.python-version ./
 RUN uv sync --frozen --no-cache --no-dev
 
 COPY backend/app/ ./app/
+COPY backend/alembic.ini ./alembic.ini
+COPY backend/alembic/ ./alembic/
 
 # Copy built frontend into static directory
 COPY --from=frontend-build /app/frontend/build ./static/frontend
