@@ -55,6 +55,7 @@ class ProviderSpec:
 GEMINI_PRICING: dict[str, tuple[int, int]] = {
     "gemini-2.5-flash": (30, 250),  # $0.30 in / $2.50 out per 1M tokens
     "gemini-2.5-flash-lite": (10, 40),  # $0.10 in / $0.40 out per 1M tokens
+    "gemini-3.1-flash-lite": (25, 50),  # $0.25 in / $0.50 out per 1M tokens
     "gemini-3.5-flash": (150, 900),  # $1.50 in / $9.00 out per 1M tokens
     "gemini-3-flash-preview": (50, 300),  # $0.50 in / $3.00 out per 1M tokens
 }
