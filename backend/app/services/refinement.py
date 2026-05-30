@@ -1,5 +1,12 @@
-"""Shared boundary-refinement logic used by both the production Celery task
-and the eval pipeline. Given a text-model-predicted ad-break edge, this module
+"""WIP — boundary refinement is not wired into the production AI clipping
+chain. `queue_episode_for_clipping` deliberately omits `task_refine_boundaries`
+because offline evals have not yet shown a clear quality win over plain
+analysis to justify the extra cost and latency. Until that changes, the
+helper below is only exercised by the `ai_refined` eval mode and by direct
+invocation of `task_refine_boundaries` (which remains a registered Celery
+task and a config-gated no-op if no `boundary_refinement_model` is set).
+
+Shared boundary-refinement logic. Given a text-model-predicted ad-break edge,
 decides whether to snap it to an episode edge, send a short audio window to
 the refinement provider, or keep the original boundary."""
 

@@ -263,7 +263,10 @@ def task_analyse(self, episode_id: str, report_id: str) -> None:
     time_limit=1860,
 )
 def task_refine_boundaries(self, episode_id: str, report_id: str) -> None:
-    """Refine the outer edges of each ad break produced by `task_analyse` using
+    """WIP — not invoked by `queue_episode_for_clipping`. See the module
+    docstring on `app.services.refinement` for the rationale.
+
+    Refine the outer edges of each ad break produced by `task_analyse` using
     a Gemini audio model. For each break, sends a 20s window around each edge
     to the model and updates the timestamp with the model's exact offset. Edges
     that fall within SNAP_TO_EDGE_MS of episode start/end are snapped instead.
