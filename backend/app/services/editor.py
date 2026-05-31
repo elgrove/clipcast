@@ -12,6 +12,9 @@ logger = logging.getLogger(__name__)
 
 
 def parse_time_to_ms(time_str: str) -> int:
+    # Accept SRT-style timestamps where the fractional second uses a comma
+    # separator (HH:MM:SS,mmm) as well as the dotted form.
+    time_str = time_str.strip().replace(",", ".")
     parts = time_str.split(":")
     if len(parts) == 3:
         h, m, s = parts
