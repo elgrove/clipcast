@@ -18,12 +18,8 @@ docker compose up -d
 
 This starts:
 
-- `clipcast` - the web app (FastAPI, port 8906)
-- `worker` - Celery worker for downloads, editing, and the beat scheduler
-- `aiworker` - Celery worker for Gemini API calls (transcription + analysis)
-- `whisperworker` - Celery worker for local Whisper transcription (concurrency 1)
-- `redis` - task queue broker
-- `transcription` - Whisper.cpp server for local transcription
+- `clipcast` - the web app and all workers (FastAPI on port 8906, Redis, and three Celery workers supervised by s6-overlay)
+- `transcription` - Whisper.cpp server for local transcription (optional)
 
 On first run, the web UI will walk you through configuring your transcription and analysis models, adding a podcast, and clipping an episode.
 

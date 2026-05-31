@@ -1,0 +1,6 @@
+#!/command/with-contenv sh
+# Run Alembic migrations (init_db -> alembic upgrade head) before any
+# longrun service starts. with-contenv pulls in the container environment
+# so DATABASE_PATH points at the mounted DB, not the in-image default.
+cd /app
+exec uv run python -c "from app.database import init_db; init_db()"
