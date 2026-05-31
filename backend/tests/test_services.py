@@ -33,6 +33,13 @@ def test_parse_time_to_ms_hhmmss_with_ms():
     assert parse_time_to_ms("00:00:13.500") == 13500
 
 
+def test_parse_time_to_ms_comma_decimal():
+    # SRT-style timestamps use a comma before the fractional second
+    assert parse_time_to_ms("00:00:40,600000") == 40600
+    assert parse_time_to_ms("01:31,960") == 91960
+    assert parse_time_to_ms("31,960") == 31960
+
+
 # ── format_ms_to_time / clipped_ms_to_raw_ms ─────────────────────────────────
 
 
