@@ -9,10 +9,13 @@ from app.models import (
     BatchClipRequest,
     ClippingReport,
     ClippingReportRead,
+    EpisodeDetailRead,
     PodcastEpisode,
     PodcastEpisodeRead,
     PodcastShow,
+    TranscriptionSegment,
 )
+from app.routers.reports import report_to_detail
 from app.tasks import queue_episode_for_clipping
 
 logger = logging.getLogger("clipcast")
@@ -50,6 +53,7 @@ def _episode_to_read(episode: PodcastEpisode, session: Session) -> PodcastEpisod
         description=episode.description,
         duration=episode.duration,
         source_audio_url=episode.source_audio_url,
+        image_url=episode.image_url,
         is_downloaded=is_downloaded,
         is_clipped=is_clipped,
         is_cleaned=episode.is_cleaned,
@@ -58,6 +62,45 @@ def _episode_to_read(episode: PodcastEpisode, session: Session) -> PodcastEpisod
         ad_break_seconds=ad_break_seconds,
         clipping_status=latest_report.status.value if latest_report else None,
     )
+
+
+@router.get("/api/episodes/{episode_id}", response_model=EpisodeDetailRead)
+def get_episode(episode_id: str, session: Session = Depends(get_session)):
+    episode = session.get(PodcastEpisode, episode_id)
+    if not episode:
+        raise HTTPException(status_code=404, detail="Episode not found")
+
+    podcast = session.get(PodcastShow, episode.podcast_id)
+
+    latest_report = session.exec(
+        select(ClippingReport)
+        .where(ClippingReport.episode_id == episode.id)
+        .order_by(ClippingReport.queued_at.desc())
+    ).first()
+
+    base = _episode_to_read(episode, session)
+    return EpisodeDetailRead(
+        **base.model_dump(),
+        podcast_title=podcast.title if podcast else "Unknown",
+        podcast_image_url=(
+            f"/podcasts/{podcast.id}/image" if podcast and podcast.image_path.exists() else None
+        ),
+        audio_url=(
+            f"/podcasts/{episode.podcast_id}/episode/{episode.id}/audio"
+            if episode.has_file
+            else None
+        ),
+        ad_breaks=episode.ad_breaks,
+        report=report_to_detail(latest_report, session) if latest_report else None,
+    )
+
+
+@router.get("/api/episodes/{episode_id}/transcript", response_model=list[TranscriptionSegment])
+def episode_transcript(episode_id: str, session: Session = Depends(get_session)):
+    episode = session.get(PodcastEpisode, episode_id)
+    if not episode:
+        raise HTTPException(status_code=404, detail="Episode not found")
+    return episode.transcription
 
 
 @router.get(
@@ -176,6 +219,7 @@ def episode_status(episode_id: str, session: Session = Depends(get_session)):
         downloaded_at=report.downloaded_at,
         transcribed_at=report.transcribed_at,
         analysed_at=report.analysed_at,
+        refined_at=report.refined_at,
         edited_at=report.edited_at,
         logs=report.logs,
         exceptions=report.exceptions,

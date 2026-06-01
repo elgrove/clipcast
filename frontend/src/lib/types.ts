@@ -24,6 +24,7 @@ export interface PodcastEpisode {
 	description: string;
 	duration: number | null;
 	source_audio_url: string;
+	image_url: string | null;
 	is_downloaded: boolean;
 	is_clipped: boolean;
 	is_cleaned: boolean;
@@ -31,6 +32,32 @@ export interface PodcastEpisode {
 	ad_break_count: number;
 	ad_break_seconds: number;
 	clipping_status: string | null;
+}
+
+export interface Advert {
+	start_time: string;
+	end_time: string;
+	advert_for: string;
+}
+
+export interface AdBreak {
+	start_time: string;
+	end_time: string;
+	adverts: Advert[] | null;
+}
+
+export interface TranscriptionSegment {
+	start_time: number;
+	end_time: number;
+	text: string;
+}
+
+export interface EpisodeDetail extends PodcastEpisode {
+	podcast_title: string;
+	podcast_image_url: string | null;
+	audio_url: string | null;
+	ad_breaks: AdBreak[];
+	report: ClippingReportDetail | null;
 }
 
 export interface EpisodeListResponse {

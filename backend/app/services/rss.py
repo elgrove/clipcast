@@ -33,6 +33,7 @@ class RSSEpisode(PydanticBaseModel):
     published_at: datetime | None
     duration: int | None
     audio_url: str
+    artwork_url: str | None = None
 
 
 class RSSPodcast(PydanticBaseModel):
@@ -143,6 +144,27 @@ def _get_audio_url(entry: dict) -> str:
     return ""
 
 
+def _get_entry_artwork_url(entry: dict) -> str | None:
+    itunes_image = entry.get("itunes_image")
+    if isinstance(itunes_image, str):
+        return itunes_image
+    if isinstance(itunes_image, dict) and "href" in itunes_image:
+        return itunes_image["href"]
+
+    image = entry.get("image")
+    if isinstance(image, dict):
+        if "href" in image:
+            return image["href"]
+        if "url" in image:
+            return image["url"]
+
+    thumbnails = entry.get("media_thumbnail")
+    if isinstance(thumbnails, list) and thumbnails and "url" in thumbnails[0]:
+        return thumbnails[0]["url"]
+
+    return None
+
+
 def _get_artwork_url(feed_data: dict) -> str | None:
     if hasattr(feed_data, "image") and isinstance(feed_data.image, dict):
         if "href" in feed_data.image:
@@ -176,6 +198,7 @@ def parse_rss_feed(feed_url: str) -> RSSPodcast:
                 published_at=_parse_date(entry.get("published")),
                 duration=_parse_duration(duration),
                 audio_url=_get_audio_url(entry),
+                artwork_url=_get_entry_artwork_url(entry),
             )
         )
 
@@ -272,6 +295,7 @@ def sync_podcast_episodes_from_rss(
             episode.published_at = ep.published_at
             episode.duration = ep.duration
             episode.source_audio_url = ep.audio_url
+            episode.image_url = ep.artwork_url
         else:
             episode = PodcastEpisode(
                 podcast_id=podcast.id,
@@ -281,6 +305,7 @@ def sync_podcast_episodes_from_rss(
                 published_at=ep.published_at,
                 duration=ep.duration,
                 source_audio_url=ep.audio_url,
+                image_url=ep.artwork_url,
             )
 
         session.add(episode)
