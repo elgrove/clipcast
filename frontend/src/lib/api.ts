@@ -2,6 +2,8 @@ import type {
 	PodcastShow,
 	PodcastEpisode,
 	EpisodeListResponse,
+	EpisodeDetail,
+	TranscriptionSegment,
 	Config,
 	AIModel,
 	AIProvider,
@@ -103,6 +105,14 @@ export async function getEpisodes(
 	return fetchApi<EpisodeListResponse>(
 		`/api/podcasts/${podcastId}/episodes?${params}`
 	);
+}
+
+export async function getEpisode(id: string): Promise<EpisodeDetail> {
+	return fetchApi<EpisodeDetail>(`/api/episodes/${id}`);
+}
+
+export async function getEpisodeTranscript(id: string): Promise<TranscriptionSegment[]> {
+	return fetchApi<TranscriptionSegment[]>(`/api/episodes/${id}/transcript`);
 }
 
 export async function downloadEpisode(id: string): Promise<void> {

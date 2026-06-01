@@ -75,7 +75,10 @@
 	}
 
 	function mobileCardTap(episodeId: string) {
-		if (!mobileSelectMode) return;
+		if (!mobileSelectMode) {
+			goto(`/episode/${episodeId}`);
+			return;
+		}
 		toggleSelect(episodeId);
 		if (selectedIds.size === 0) {
 			mobileSelectMode = false;
@@ -679,8 +682,13 @@
 											class="h-4 w-4 rounded border-zinc-300 text-emerald-600 focus:ring-emerald-500 dark:border-zinc-600"
 										/>
 									</td>
-									<td class="max-w-xs truncate px-3 py-3 font-medium text-zinc-900 dark:text-white">
-										{episode.title}
+									<td class="max-w-xs truncate px-3 py-3 font-medium">
+										<a
+											href="/episode/{episode.id}"
+											class="text-zinc-900 hover:text-emerald-600 hover:underline dark:text-white dark:hover:text-emerald-400"
+										>
+											{episode.title}
+										</a>
 									</td>
 									<td class="whitespace-nowrap px-3 py-3 text-zinc-500 dark:text-zinc-400">
 										{formatDate(episode.published_at)}
@@ -891,7 +899,8 @@
 								</div>
 							</div>
 							{#if !mobileSelectMode}
-								<div class="flex flex-shrink-0 items-start gap-1">
+								<!-- svelte-ignore a11y_no_static_element_interactions a11y_click_events_have_key_events -->
+								<div class="flex flex-shrink-0 items-start gap-1" onclick={(e) => e.stopPropagation()}>
 									<button
 										onclick={() => handleClip(episode.id)}
 										disabled={clippingIds.has(episode.id) ||

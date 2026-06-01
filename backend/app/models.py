@@ -272,6 +272,7 @@ class PodcastEpisode(SQLModel, table=True):
     description: str = Field(default="", sa_column=Column(Text))
     duration: int | None = Field(default=None)
     source_audio_url: str = Field(default="", max_length=500)
+    image_url: str | None = Field(default=None, max_length=500)
     stored_filename: str = Field(default="", max_length=500)
     cleaned_at: datetime | None = Field(default=None)
     ad_breaks_json: str = Field(default="[]", sa_column=Column("ad_breaks", Text))
@@ -488,6 +489,7 @@ class PodcastEpisodeRead(PydanticBaseModel):
     description: str
     duration: int | None
     source_audio_url: str
+    image_url: str | None = None
     is_downloaded: bool = False
     is_clipped: bool = False
     is_cleaned: bool = False
@@ -630,6 +632,14 @@ class ClippingReportDetail(PydanticBaseModel):
     boundaries_snapped: int | None = None
     boundaries_kept: int | None = None
     has_exceptions: bool = False
+
+
+class EpisodeDetailRead(PodcastEpisodeRead):
+    podcast_title: str
+    podcast_image_url: str | None = None
+    audio_url: str | None = None
+    ad_breaks: list[AdBreak] = []
+    report: ClippingReportDetail | None = None
 
 
 class BatchClipRequest(PydanticBaseModel):
