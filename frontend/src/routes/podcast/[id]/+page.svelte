@@ -16,6 +16,7 @@
 	} from '$lib/api';
 	import { toasts } from '$lib/stores';
 	import { formatDurationShort } from '$lib/utils';
+	import ShowNotes from '$lib/components/ShowNotes.svelte';
 	import type { PodcastShow, PodcastEpisode, ClippingReport } from '$lib/types';
 
 	let podcastId = $state('');
@@ -533,12 +534,10 @@
 				</div>
 
 				{#if podcast.description}
-					{@const cleanDescription = stripHtml(podcast.description)}
+					{@const plain = stripHtml(podcast.description)}
 					<div class="mt-2 hidden sm:block">
-						<p class="text-sm text-zinc-600 dark:text-zinc-400 {descriptionExpanded ? '' : 'line-clamp-3'}">
-							{cleanDescription}
-						</p>
-						{#if cleanDescription.length > 200}
+						<ShowNotes html={podcast.description} class={descriptionExpanded ? '' : 'line-clamp-3'} />
+						{#if plain.length > 200}
 							<button
 								onclick={() => (descriptionExpanded = !descriptionExpanded)}
 								class="mt-1 text-xs font-medium text-emerald-600 hover:text-emerald-700 dark:text-emerald-400"
