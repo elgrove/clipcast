@@ -277,6 +277,8 @@
 			</div>
 		</div>
 
+		<!-- Everything below the header only appears once the episode has been clipped -->
+		{#if episode.is_clipped}
 		<!-- Audio player -->
 		{#if episode.audio_url}
 			<audio controls src={episode.audio_url} class="w-full">
@@ -313,7 +315,7 @@
 			</div>
 			{#if episode.ad_breaks.length === 0}
 				<p class="mt-2 text-sm text-zinc-500 dark:text-zinc-400">
-					No adverts detected{episode.is_clipped ? '' : ' yet'}.
+					No adverts detected.
 				</p>
 			{:else}
 				<ul class="mt-3 space-y-2">
@@ -473,6 +475,7 @@
 					</div>
 				{/if}
 			</div>
+		{/if}
 		{/if}
 	</div>
 {/if}
