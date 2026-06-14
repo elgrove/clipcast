@@ -73,6 +73,7 @@ export interface Config {
 	analysis_model_id: string | null;
 	boundary_refinement_model_id: string | null;
 	keep_raw_episodes: boolean;
+	scan_acast_ads: boolean;
 	transcription_model: AIModel | null;
 	analysis_model: AIModel | null;
 	boundary_refinement_model: AIModel | null;

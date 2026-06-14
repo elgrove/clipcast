@@ -1,6 +1,9 @@
 import json
 import logging
+import os
+import tempfile
 from datetime import datetime, timedelta
+from pathlib import Path
 
 from celery import chain
 from pydub import AudioSegment
@@ -9,6 +12,7 @@ from sqlmodel import Session, select
 from app.database import engine
 from app.models import (
     AdBreak,
+    Advert,
     AnalysisReport,
     AppConfig,
     ClipMode,
@@ -517,6 +521,214 @@ def task_detect_acast_ads(self, episode_id: str, report_id: str) -> None:
     ad_breaks_path.write_text(json.dumps({"breaks": [b.model_dump() for b in breaks]}, indent=2))
 
 
+@celery_app.task(
+    name="app.tasks.task_scan_acast_ads",
+    bind=True,
+    max_retries=3,
+    default_retry_delay=60,
+    autoretry_for=(Exception,),
+    retry_backoff=True,
+    retry_backoff_max=600,
+    soft_time_limit=14400,
+    time_limit=14700,
+)
+def task_scan_acast_ads(self, episode_id: str, report_id: str) -> None:
+    """After Acast ident detection, run an AI pass over the episode (still before
+    editing) that does two things:
+
+    1. **Reporting:** transcribe and itemise each jingle-bracketed ad section so
+       the report records which advertisers appeared in the audio that gets cut.
+    2. **Host reads:** scan the content window following each break for a
+       host-read third-party advert and append it as a new cut.
+
+    Gated on the global ``scan_acast_ads`` config flag (default on); no-ops when
+    disabled or when transcription/analysis models are unconfigured. In Acast
+    mode ``refined_at`` is otherwise unused, so it doubles as the scan-complete
+    marker; ``refinement_report`` carries the analysis cost."""
+    from app.services.acast import (
+        clamp_ad_break,
+        clamp_adverts,
+        compute_trailing_windows,
+        offset_ad_break,
+        offset_adverts,
+    )
+
+    with Session(engine) as session:
+        report = session.get(ClippingReport, report_id)
+        if report and report.refined_at:
+            _log_report(report_id, "Acast AI scan already done, skipping")
+            return
+
+        episode = session.get(PodcastEpisode, episode_id)
+        if not episode:
+            raise ValueError(f"Episode not found: {episode_id}")
+
+        config = session.get(AppConfig, "config")
+        if not config or not config.scan_acast_ads:
+            _log_report(report_id, "Acast AI scan disabled — skipping")
+            _update_report(report_id, refined_at=datetime.utcnow())
+            return
+
+        if not config.transcription_model or not config.analysis_model:
+            _log_report(
+                report_id,
+                "Acast AI scan skipped — transcription/analysis model not configured",
+            )
+            _update_report(report_id, refined_at=datetime.utcnow())
+            return
+
+        try:
+            transcribe_provider = get_ai_provider("transcription", config)
+            analyse_provider = get_ai_provider("analysis", config)
+        except ValueError as e:
+            _log_report(report_id, f"Acast AI scan skipped — {e}")
+            _update_report(report_id, refined_at=datetime.utcnow())
+            return
+
+        existing = list(episode.ad_breaks)
+        ident_breaks = [b for b in existing if b.source == "acast_ident"]
+        audio_path = episode.mp3_path
+        ad_breaks_path = episode.ad_breaks_path
+        transcription_provider_name = config.transcription_model.provider.kind
+        transcription_model_name = config.transcription_model.name
+        analysis_provider_name = config.analysis_model.provider.kind
+        analysis_model_name = config.analysis_model.name
+
+    _log_report(report_id, "Scanning Acast ad sections and post-break content...")
+
+    transcription_report = TranscriptionReport(
+        started_at=datetime.utcnow().isoformat(),
+        provider=transcription_provider_name,
+        model_name=transcription_model_name,
+    )
+    analysis_report = RefinementReport(
+        started_at=datetime.utcnow().isoformat(),
+        provider=analysis_provider_name,
+        model_name=analysis_model_name,
+    )
+
+    def _accumulate(sub_transcription: TranscriptionReport, sub_analysis: AnalysisReport) -> None:
+        transcription_report.input_tokens = (transcription_report.input_tokens or 0) + (
+            sub_transcription.input_tokens or 0
+        )
+        transcription_report.output_tokens = (transcription_report.output_tokens or 0) + (
+            sub_transcription.output_tokens or 0
+        )
+        transcription_report.cost_usd = (transcription_report.cost_usd or 0.0) + (
+            sub_transcription.cost_usd or 0.0
+        )
+        analysis_report.input_tokens = (analysis_report.input_tokens or 0) + (
+            sub_analysis.input_tokens or 0
+        )
+        analysis_report.output_tokens = (analysis_report.output_tokens or 0) + (
+            sub_analysis.output_tokens or 0
+        )
+        analysis_report.cost_usd = (analysis_report.cost_usd or 0.0) + (
+            sub_analysis.cost_usd or 0.0
+        )
+
+    def _scan_window(start_ms: int, end_ms: int, analyse) -> list[AdBreak] | None:
+        """Export the [start_ms, end_ms) slice, transcribe it, and run ``analyse``
+        (a provider method taking a Transcription). Returns the window-relative
+        breaks, or None if the slice had no speech."""
+        clip = audio[start_ms:end_ms]
+        temp_fd, temp_path_str = tempfile.mkstemp(suffix=".mp3")
+        temp_path = Path(temp_path_str)
+        os.close(temp_fd)
+        try:
+            clip.export(temp_path, format="mp3")
+            sub_transcription = TranscriptionReport()
+            transcription = transcribe_provider.transcribe(temp_path, sub_transcription)
+            if not transcription.segments:
+                _accumulate(sub_transcription, AnalysisReport())
+                return None
+            sub_analysis = AnalysisReport()
+            breaks = analyse(transcription, sub_analysis)
+        finally:
+            if temp_path.exists():
+                temp_path.unlink()
+        _accumulate(sub_transcription, sub_analysis)
+        return breaks
+
+    reported_idents: list[AdBreak] = []
+    host_reads: list[AdBreak] = []
+    sections_reported = 0
+    try:
+        with open(audio_path, "rb") as fh:
+            audio = AudioSegment.from_file(fh, format="mp3")
+        audio_duration_s = len(audio) / 1000.0
+
+        # 1. Report the adverts inside each ident-bracketed section.
+        for br in ident_breaks:
+            if br.adverts:
+                reported_idents.append(br)
+                continue
+            start_ms = parse_time_to_ms(br.start_time)
+            end_ms = parse_time_to_ms(br.end_time)
+            adverts: list[Advert] = []
+            if end_ms > start_ms:
+                breaks = _scan_window(start_ms, end_ms, analyse_provider.analyse_acast_section)
+                for found in breaks or []:
+                    if found.adverts:
+                        adverts.extend(offset_adverts(found.adverts, start_ms))
+                adverts = clamp_adverts(adverts, start_ms, end_ms)
+            if adverts:
+                sections_reported += 1
+            reported_idents.append(
+                AdBreak(
+                    start_time=br.start_time,
+                    end_time=br.end_time,
+                    adverts=adverts or None,
+                    source="acast_ident",
+                )
+            )
+
+        # 2. Scan the content window after each break for host-read adverts.
+        windows = compute_trailing_windows(ident_breaks, audio_duration_s)
+        for start_s, end_s in windows:
+            window_lo = int(start_s * 1000)
+            window_hi = int(end_s * 1000)
+            breaks = _scan_window(window_lo, window_hi, analyse_provider.analyse_host_reads)
+            for br in breaks or []:
+                shifted = offset_ad_break(br, window_lo, source="host_read")
+                clamped = clamp_ad_break(shifted, window_lo, window_hi)
+                if clamped is not None:
+                    host_reads.append(clamped)
+
+        transcription_report.completed_at = datetime.utcnow().isoformat()
+        analysis_report.completed_at = datetime.utcnow().isoformat()
+    except Exception as e:
+        transcription_report.error = str(e)
+        with Session(engine) as session:
+            report = session.get(ClippingReport, report_id)
+            report.transcription_report = transcription_report
+            report.add_exception(e)
+            report.append_log(f"Acast AI scan failed: {e}")
+            session.add(report)
+            session.commit()
+        raise
+
+    merged = reported_idents + host_reads
+    with Session(engine) as session:
+        episode = session.get(PodcastEpisode, episode_id)
+        episode.ad_breaks = merged
+        session.add(episode)
+        session.commit()
+
+        report = session.get(ClippingReport, report_id)
+        report.transcription_report = transcription_report
+        report.refinement_report = analysis_report
+        report.refined_at = datetime.utcnow()
+        report.append_log(
+            f"Acast AI scan: reported ads in {sections_reported}/{len(ident_breaks)} "
+            f"section(s); {len(host_reads)} host-read(s) found across {len(windows)} window(s)"
+        )
+        session.add(report)
+        session.commit()
+
+    ad_breaks_path.write_text(json.dumps({"breaks": [b.model_dump() for b in merged]}, indent=2))
+
+
 # ── Queue orchestration ──────────────────────────────────────────────────────
 
 
@@ -548,9 +760,13 @@ def queue_episode_for_clipping(
     clip_mode = episode.podcast.clip_mode
 
     if clip_mode == ClipMode.ACAST:
+        # The Acast AI scan is a config-gated no-op unless enabled; it transcribes
+        # and analyses short windows so it runs on the transcription queue.
+        transcription_queue = _get_transcription_queue(session)
         pipeline = chain(
             task_download.si(episode.id, report.id),
             task_detect_acast_ads.si(episode.id, report.id),
+            task_scan_acast_ads.si(episode.id, report.id).set(queue=transcription_queue),
             task_edit.si(episode.id, report.id),
         )
     else:

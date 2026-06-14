@@ -25,7 +25,9 @@ from app.models import (
     TranscriptionSegment,
 )
 from app.services.prompts import (
+    ANALYSE_ACAST_SECTION_PROMPT,
     ANALYSE_AD_BREAKS_PROMPT,
+    ANALYSE_HOST_READ_PROMPT,
     REFINE_AD_END_PROMPT,
     REFINE_AD_START_PROMPT,
     TRANSCRIBE_AUDIO_PROMPT,
@@ -105,6 +107,26 @@ class AIProviderBase(ABC):
     ) -> list[AdBreak]:
         pass
 
+    @abstractmethod
+    def analyse_host_reads(
+        self,
+        transcription: Transcription,
+        report: AnalysisReport = None,
+    ) -> list[AdBreak]:
+        """Find host-read third-party adverts in a short window of content that
+        follows an ad break. Timestamps are window-relative; the caller offsets
+        them back to absolute episode time."""
+
+    @abstractmethod
+    def analyse_acast_section(
+        self,
+        transcription: Transcription,
+        report: AnalysisReport = None,
+    ) -> list[AdBreak]:
+        """Itemise the adverts within a window already known to be an ad break
+        (bracketed by Acast idents), for reporting. Timestamps are window-relative;
+        the caller offsets them back to absolute episode time."""
+
     def calculate_cost(self, input_tokens, output_tokens, model_config: AIModel):
         input_cost = (
             Decimal(input_tokens)
@@ -179,19 +201,39 @@ class GeminiProvider(AIProviderBase):
         custom_instructions: str | None = None,
         chunk_range: tuple[float, float] | None = None,
     ) -> list[AdBreak]:
-        logger.info("Analysing ad breaks with Gemini model %s", self.model_config.name)
-
-        client = genai.Client(
-            api_key=self.api_key,
-            http_options=types.HttpOptions(timeout=ANALYSIS_TIMEOUT * 1000),
-        )
-
         transcript_json = json.dumps(transcription.model_dump(), indent=2)
         prompt = ANALYSE_AD_BREAKS_PROMPT.format(transcript=transcript_json)
         if chunk_range is not None:
             prompt += _format_chunk_range(chunk_range)
         if custom_instructions:
             prompt += f"\n\nAdditional instructions:\n{custom_instructions}"
+        return self._run_analysis(prompt, report)
+
+    def analyse_host_reads(
+        self,
+        transcription: Transcription,
+        report: AnalysisReport = None,
+    ) -> list[AdBreak]:
+        transcript_json = json.dumps(transcription.model_dump(), indent=2)
+        prompt = ANALYSE_HOST_READ_PROMPT.format(transcript=transcript_json)
+        return self._run_analysis(prompt, report)
+
+    def analyse_acast_section(
+        self,
+        transcription: Transcription,
+        report: AnalysisReport = None,
+    ) -> list[AdBreak]:
+        transcript_json = json.dumps(transcription.model_dump(), indent=2)
+        prompt = ANALYSE_ACAST_SECTION_PROMPT.format(transcript=transcript_json)
+        return self._run_analysis(prompt, report)
+
+    def _run_analysis(self, prompt: str, report: AnalysisReport | None) -> list[AdBreak]:
+        logger.info("Analysing with Gemini model %s", self.model_config.name)
+
+        client = genai.Client(
+            api_key=self.api_key,
+            http_options=types.HttpOptions(timeout=ANALYSIS_TIMEOUT * 1000),
+        )
 
         response = client.models.generate_content(
             model=self.model_config.name,
@@ -353,6 +395,20 @@ class WhisperProvider(AIProviderBase):
     ) -> list[AdBreak]:
         raise NotImplementedError("WhisperProvider only supports transcription, not analysis")
 
+    def analyse_host_reads(
+        self,
+        transcription: Transcription,
+        report: AnalysisReport = None,
+    ) -> list[AdBreak]:
+        raise NotImplementedError("WhisperProvider only supports transcription, not analysis")
+
+    def analyse_acast_section(
+        self,
+        transcription: Transcription,
+        report: AnalysisReport = None,
+    ) -> list[AdBreak]:
+        raise NotImplementedError("WhisperProvider only supports transcription, not analysis")
+
 
 class OpenAICompatibleProvider(AIProviderBase):
     """Shared base for any provider exposing an OpenAI-compatible Chat Completions API
@@ -406,18 +462,38 @@ class OpenAICompatibleProvider(AIProviderBase):
         custom_instructions: str | None = None,
         chunk_range: tuple[float, float] | None = None,
     ) -> list[AdBreak]:
-        logger.info(
-            "Analysing ad breaks with %s model %s",
-            type(self).__name__,
-            self.model_config.name,
-        )
-
         transcript_json = json.dumps(transcription.model_dump(), indent=2)
         prompt = ANALYSE_AD_BREAKS_PROMPT.format(transcript=transcript_json)
         if chunk_range is not None:
             prompt += _format_chunk_range(chunk_range)
         if custom_instructions:
             prompt += f"\n\nAdditional instructions:\n{custom_instructions}"
+        return self._run_analysis(prompt, report)
+
+    def analyse_host_reads(
+        self,
+        transcription: Transcription,
+        report: AnalysisReport = None,
+    ) -> list[AdBreak]:
+        transcript_json = json.dumps(transcription.model_dump(), indent=2)
+        prompt = ANALYSE_HOST_READ_PROMPT.format(transcript=transcript_json)
+        return self._run_analysis(prompt, report)
+
+    def analyse_acast_section(
+        self,
+        transcription: Transcription,
+        report: AnalysisReport = None,
+    ) -> list[AdBreak]:
+        transcript_json = json.dumps(transcription.model_dump(), indent=2)
+        prompt = ANALYSE_ACAST_SECTION_PROMPT.format(transcript=transcript_json)
+        return self._run_analysis(prompt, report)
+
+    def _run_analysis(self, prompt: str, report: AnalysisReport | None) -> list[AdBreak]:
+        logger.info(
+            "Analysing with %s model %s",
+            type(self).__name__,
+            self.model_config.name,
+        )
 
         completion = self._client().beta.chat.completions.parse(
             model=self.model_config.name,

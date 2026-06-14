@@ -2,16 +2,33 @@ import numpy as np
 import pytest
 from pydub import AudioSegment
 
+from app.models import AdBreak, Advert
 from app.services.acast import (
     IDENT_PATH,
     MAX_PAIR_GAP_S,
+    MIN_HOST_READ_WINDOW_S,
     MIN_PAIR_GAP_S,
     SAMPLE_RATE,
     acast_feed_url_heuristic,
+    clamp_ad_break,
+    clamp_adverts,
+    compute_trailing_windows,
     detect_idents,
     idents_to_ad_breaks,
+    offset_ad_break,
+    offset_adverts,
     pair_idents,
 )
+from app.services.editor import format_ms_to_time, parse_time_to_ms
+
+
+def _break_s(start_s: float, end_s: float, source: str = "acast_ident") -> AdBreak:
+    return AdBreak(
+        start_time=format_ms_to_time(int(start_s * 1000)),
+        end_time=format_ms_to_time(int(end_s * 1000)),
+        source=source,
+    )
+
 
 # ── URL heuristic ────────────────────────────────────────────────────────────
 
@@ -134,6 +151,7 @@ def test_idents_to_ad_breaks_cut_span():
     assert len(breaks) == 1
     br = breaks[0]
     assert br.adverts is None
+    assert br.source == "acast_ident"
     # Cut spans start-of-opening-ident to end-of-closing-ident so no jingle audio survives.
     assert br.start_time == "00:00:10.000"
     assert br.end_time == "00:01:33.000"
@@ -195,3 +213,172 @@ def test_detect_idents_synthetic(tmp_path):
         assert abs(start_s - target_s) <= 0.25, (
             f"Detected ident at {start_s:.3f}s, expected ~{target_s}s"
         )
+
+
+# ── compute_trailing_windows ──────────────────────────────────────────────────
+
+
+def test_trailing_window_mid_episode():
+    # Break ends at 90s, episode is long → full 300s window after it.
+    windows = compute_trailing_windows([_break_s(60, 90)], audio_duration_s=3600)
+    assert windows == [(90.0, 390.0)]
+
+
+def test_trailing_window_clamped_to_audio_end():
+    windows = compute_trailing_windows([_break_s(60, 90)], audio_duration_s=200)
+    assert windows == [(90.0, 200.0)]
+
+
+def test_trailing_window_clamped_to_next_break():
+    # First window must stop at the next break's opening, not reach into it.
+    breaks = [_break_s(60, 90), _break_s(120, 150)]
+    windows = compute_trailing_windows(breaks, audio_duration_s=3600)
+    assert windows == [(90.0, 120.0), (150.0, 450.0)]
+
+
+def test_trailing_window_dropped_when_too_short():
+    # Only 10s of content after the break → below MIN_HOST_READ_WINDOW_S.
+    windows = compute_trailing_windows([_break_s(60, 90)], audio_duration_s=100)
+    assert windows == []
+
+
+def test_trailing_window_kept_at_exact_minimum():
+    windows = compute_trailing_windows(
+        [_break_s(60, 90)], audio_duration_s=90 + MIN_HOST_READ_WINDOW_S
+    )
+    assert windows == [(90.0, 90.0 + MIN_HOST_READ_WINDOW_S)]
+
+
+def test_trailing_window_empty_breaks():
+    assert compute_trailing_windows([], audio_duration_s=3600) == []
+
+
+def test_trailing_window_unsorted_breaks_sorted_first():
+    breaks = [_break_s(120, 150), _break_s(60, 90)]
+    windows = compute_trailing_windows(breaks, audio_duration_s=3600)
+    assert windows == [(90.0, 120.0), (150.0, 450.0)]
+
+
+# ── offset_ad_break ───────────────────────────────────────────────────────────
+
+
+def test_offset_ad_break_shifts_break_and_adverts():
+    window_relative = AdBreak(
+        start_time=format_ms_to_time(10_000),
+        end_time=format_ms_to_time(40_000),
+        adverts=[
+            Advert(
+                start_time=format_ms_to_time(12_000),
+                end_time=format_ms_to_time(38_000),
+                advert_for="Brand",
+            )
+        ],
+        source=None,
+    )
+    shifted = offset_ad_break(window_relative, offset_ms=90_000, source="host_read")
+
+    assert parse_time_to_ms(shifted.start_time) == 100_000
+    assert parse_time_to_ms(shifted.end_time) == 130_000
+    assert shifted.source == "host_read"
+    assert shifted.adverts is not None
+    assert parse_time_to_ms(shifted.adverts[0].start_time) == 102_000
+    assert parse_time_to_ms(shifted.adverts[0].end_time) == 128_000
+    assert shifted.adverts[0].advert_for == "Brand"
+
+
+def test_offset_ad_break_preserves_source_when_not_overridden():
+    br = _break_s(10, 20, source="acast_ident")
+    shifted = offset_ad_break(br, offset_ms=5_000)
+    assert shifted.source == "acast_ident"
+    assert parse_time_to_ms(shifted.start_time) == 15_000
+
+
+# ── offset_adverts ────────────────────────────────────────────────────────────
+
+
+def test_offset_adverts_shifts_each_advert():
+    adverts = [
+        Advert(
+            start_time=format_ms_to_time(2_000),
+            end_time=format_ms_to_time(8_000),
+            advert_for="Shopify",
+        ),
+        Advert(
+            start_time=format_ms_to_time(10_000),
+            end_time=format_ms_to_time(15_000),
+            advert_for="Squarespace",
+        ),
+    ]
+    shifted = offset_adverts(adverts, offset_ms=60_000)
+
+    assert [a.advert_for for a in shifted] == ["Shopify", "Squarespace"]
+    assert parse_time_to_ms(shifted[0].start_time) == 62_000
+    assert parse_time_to_ms(shifted[0].end_time) == 68_000
+    assert parse_time_to_ms(shifted[1].start_time) == 70_000
+    assert parse_time_to_ms(shifted[1].end_time) == 75_000
+
+
+def test_offset_adverts_empty_list():
+    assert offset_adverts([], offset_ms=1_000) == []
+
+
+# ── clamp_adverts ─────────────────────────────────────────────────────────────
+
+
+def test_clamp_adverts_trims_overshoot_and_drops_outside():
+    adverts = [
+        # Overshoots the upper bound — end gets trimmed to hi.
+        Advert(
+            start_time=format_ms_to_time(50_000),
+            end_time=format_ms_to_time(130_000),
+            advert_for="Trimmed",
+        ),
+        # Entirely past hi — dropped.
+        Advert(
+            start_time=format_ms_to_time(125_000),
+            end_time=format_ms_to_time(140_000),
+            advert_for="Dropped",
+        ),
+        # Starts before lo — start gets raised to lo.
+        Advert(
+            start_time=format_ms_to_time(55_000),
+            end_time=format_ms_to_time(80_000),
+            advert_for="Raised",
+        ),
+    ]
+    clamped = clamp_adverts(adverts, lo_ms=60_000, hi_ms=120_000)
+
+    assert [a.advert_for for a in clamped] == ["Trimmed", "Raised"]
+    assert parse_time_to_ms(clamped[0].end_time) == 120_000
+    assert parse_time_to_ms(clamped[1].start_time) == 60_000
+
+
+# ── clamp_ad_break ────────────────────────────────────────────────────────────
+
+
+def test_clamp_ad_break_trims_boundaries_and_adverts():
+    br = AdBreak(
+        start_time=format_ms_to_time(50_000),
+        end_time=format_ms_to_time(130_000),
+        adverts=[
+            Advert(
+                start_time=format_ms_to_time(55_000),
+                end_time=format_ms_to_time(140_000),
+                advert_for="Brand",
+            )
+        ],
+        source="host_read",
+    )
+    clamped = clamp_ad_break(br, lo_ms=60_000, hi_ms=120_000)
+
+    assert clamped is not None
+    assert parse_time_to_ms(clamped.start_time) == 60_000
+    assert parse_time_to_ms(clamped.end_time) == 120_000
+    assert clamped.source == "host_read"
+    assert parse_time_to_ms(clamped.adverts[0].start_time) == 60_000
+    assert parse_time_to_ms(clamped.adverts[0].end_time) == 120_000
+
+
+def test_clamp_ad_break_drops_break_entirely_outside():
+    br = _break_s(200, 260, source="host_read")
+    assert clamp_ad_break(br, lo_ms=0, hi_ms=120_000) is None

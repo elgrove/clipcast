@@ -48,6 +48,7 @@ def get_config(session: Session = Depends(get_session)):
         analysis_model_id=config.analysis_model_id,
         boundary_refinement_model_id=config.boundary_refinement_model_id,
         keep_raw_episodes=config.keep_raw_episodes,
+        scan_acast_ads=config.scan_acast_ads,
         transcription_model=(
             _ai_model_to_read(config.transcription_model) if config.transcription_model else None
         ),
@@ -102,6 +103,8 @@ def update_config(data: ConfigUpdate, session: Session = Depends(get_session)):
         config.boundary_refinement_model_id = data.boundary_refinement_model_id or None
     if data.keep_raw_episodes is not None:
         config.keep_raw_episodes = data.keep_raw_episodes
+    if data.scan_acast_ads is not None:
+        config.scan_acast_ads = data.scan_acast_ads
     session.add(config)
     session.commit()
     session.refresh(config)
