@@ -380,6 +380,47 @@ def test_scan_idempotent_on_second_run(session, monkeypatch):
     assert sum(1 for b in episode.ad_breaks if b.source == "host_read") == 1
 
 
+def test_scan_clamps_overshooting_results_to_their_slice(session, monkeypatch):
+    """A section advert or host-read break whose end runs past its slice is
+    clamped to the slice bounds so it can't over-report or over-cut."""
+    from app.tasks import task_scan_acast_ads
+
+    _align_task_engine(monkeypatch)
+    _configure_models(session, enabled=True)
+
+    # Break 60s-90s (30s section); trailing window 90s-200s (episode is 200s).
+    episode = _make_acast_episode(session, duration_ms=200_000, breaks=[(60_000, 90_000)])
+    report = _make_report(session, episode)
+
+    # Section advert overshoots the 30s section (ends at 50s relative).
+    section = AdBreak(
+        start_time=format_ms_to_time(5_000),
+        end_time=format_ms_to_time(50_000),
+        adverts=[_advert(5_000, 50_000, "Overshoot")],
+    )
+    # Host read overshoots the 110s window (ends at 150s relative).
+    host_read = AdBreak(
+        start_time=format_ms_to_time(10_000),
+        end_time=format_ms_to_time(150_000),
+        adverts=[_advert(10_000, 150_000, "LongRead")],
+    )
+    stub = _StubProvider(host_reads=[host_read], section_breaks=[section])
+    _patch_provider(monkeypatch, stub)
+
+    task_scan_acast_ads.apply(args=[episode.id, report.id]).get()
+
+    session.refresh(episode)
+    ident = next(b for b in episode.ad_breaks if b.source == "acast_ident")
+    host = next(b for b in episode.ad_breaks if b.source == "host_read")
+
+    # Section advert clamped to the section end (90s).
+    assert parse_time_to_ms(ident.adverts[0].end_time) == 90_000
+    # Host-read break (a real cut) clamped to the window end (200s).
+    assert parse_time_to_ms(host.start_time) == 100_000
+    assert parse_time_to_ms(host.end_time) == 200_000
+    assert parse_time_to_ms(host.adverts[0].end_time) == 200_000
+
+
 def test_scan_skips_section_transcription_when_already_reported(session, monkeypatch):
     """An ident break that already carries advert detail is not re-transcribed."""
     from app.tasks import task_scan_acast_ads

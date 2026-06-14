@@ -207,3 +207,39 @@ def offset_ad_break(br: AdBreak, offset_ms: int, source: str | None = None) -> A
         adverts=offset_adverts(br.adverts, offset_ms) if br.adverts is not None else None,
         source=source if source is not None else br.source,
     )
+
+
+def clamp_adverts(adverts: list[Advert], lo_ms: int, hi_ms: int) -> list[Advert]:
+    """Clamp each advert's (absolute) timestamps to ``[lo_ms, hi_ms]``, dropping
+    any advert that falls entirely outside the range. Guards against the analysis
+    model returning timestamps beyond the slice it was given."""
+    clamped: list[Advert] = []
+    for a in adverts:
+        start = max(lo_ms, parse_time_to_ms(a.start_time))
+        end = min(hi_ms, parse_time_to_ms(a.end_time))
+        if end <= start:
+            continue
+        clamped.append(
+            Advert(
+                start_time=format_ms_to_time(start),
+                end_time=format_ms_to_time(end),
+                advert_for=a.advert_for,
+            )
+        )
+    return clamped
+
+
+def clamp_ad_break(br: AdBreak, lo_ms: int, hi_ms: int) -> AdBreak | None:
+    """Clamp a break's (absolute) outer boundaries and its adverts to
+    ``[lo_ms, hi_ms]``. Returns None if the break falls entirely outside the
+    range. Used so an over-reaching host-read result can't over-cut content."""
+    start = max(lo_ms, parse_time_to_ms(br.start_time))
+    end = min(hi_ms, parse_time_to_ms(br.end_time))
+    if end <= start:
+        return None
+    return AdBreak(
+        start_time=format_ms_to_time(start),
+        end_time=format_ms_to_time(end),
+        adverts=clamp_adverts(br.adverts, lo_ms, hi_ms) if br.adverts is not None else None,
+        source=br.source,
+    )

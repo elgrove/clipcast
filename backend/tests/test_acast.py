@@ -10,6 +10,8 @@ from app.services.acast import (
     MIN_PAIR_GAP_S,
     SAMPLE_RATE,
     acast_feed_url_heuristic,
+    clamp_ad_break,
+    clamp_adverts,
     compute_trailing_windows,
     detect_idents,
     idents_to_ad_breaks,
@@ -318,3 +320,65 @@ def test_offset_adverts_shifts_each_advert():
 
 def test_offset_adverts_empty_list():
     assert offset_adverts([], offset_ms=1_000) == []
+
+
+# ── clamp_adverts ─────────────────────────────────────────────────────────────
+
+
+def test_clamp_adverts_trims_overshoot_and_drops_outside():
+    adverts = [
+        # Overshoots the upper bound — end gets trimmed to hi.
+        Advert(
+            start_time=format_ms_to_time(50_000),
+            end_time=format_ms_to_time(130_000),
+            advert_for="Trimmed",
+        ),
+        # Entirely past hi — dropped.
+        Advert(
+            start_time=format_ms_to_time(125_000),
+            end_time=format_ms_to_time(140_000),
+            advert_for="Dropped",
+        ),
+        # Starts before lo — start gets raised to lo.
+        Advert(
+            start_time=format_ms_to_time(55_000),
+            end_time=format_ms_to_time(80_000),
+            advert_for="Raised",
+        ),
+    ]
+    clamped = clamp_adverts(adverts, lo_ms=60_000, hi_ms=120_000)
+
+    assert [a.advert_for for a in clamped] == ["Trimmed", "Raised"]
+    assert parse_time_to_ms(clamped[0].end_time) == 120_000
+    assert parse_time_to_ms(clamped[1].start_time) == 60_000
+
+
+# ── clamp_ad_break ────────────────────────────────────────────────────────────
+
+
+def test_clamp_ad_break_trims_boundaries_and_adverts():
+    br = AdBreak(
+        start_time=format_ms_to_time(50_000),
+        end_time=format_ms_to_time(130_000),
+        adverts=[
+            Advert(
+                start_time=format_ms_to_time(55_000),
+                end_time=format_ms_to_time(140_000),
+                advert_for="Brand",
+            )
+        ],
+        source="host_read",
+    )
+    clamped = clamp_ad_break(br, lo_ms=60_000, hi_ms=120_000)
+
+    assert clamped is not None
+    assert parse_time_to_ms(clamped.start_time) == 60_000
+    assert parse_time_to_ms(clamped.end_time) == 120_000
+    assert clamped.source == "host_read"
+    assert parse_time_to_ms(clamped.adverts[0].start_time) == 60_000
+    assert parse_time_to_ms(clamped.adverts[0].end_time) == 120_000
+
+
+def test_clamp_ad_break_drops_break_entirely_outside():
+    br = _break_s(200, 260, source="host_read")
+    assert clamp_ad_break(br, lo_ms=0, hi_ms=120_000) is None

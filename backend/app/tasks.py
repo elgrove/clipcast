@@ -546,6 +546,8 @@ def task_scan_acast_ads(self, episode_id: str, report_id: str) -> None:
     mode ``refined_at`` is otherwise unused, so it doubles as the scan-complete
     marker; ``refinement_report`` carries the analysis cost."""
     from app.services.acast import (
+        clamp_ad_break,
+        clamp_adverts,
         compute_trailing_windows,
         offset_ad_break,
         offset_adverts,
@@ -669,6 +671,7 @@ def task_scan_acast_ads(self, episode_id: str, report_id: str) -> None:
                 for found in breaks or []:
                     if found.adverts:
                         adverts.extend(offset_adverts(found.adverts, start_ms))
+                adverts = clamp_adverts(adverts, start_ms, end_ms)
             if adverts:
                 sections_reported += 1
             reported_idents.append(
@@ -683,12 +686,14 @@ def task_scan_acast_ads(self, episode_id: str, report_id: str) -> None:
         # 2. Scan the content window after each break for host-read adverts.
         windows = compute_trailing_windows(ident_breaks, audio_duration_s)
         for start_s, end_s in windows:
-            breaks = _scan_window(
-                int(start_s * 1000), int(end_s * 1000), analyse_provider.analyse_host_reads
-            )
-            offset_ms = int(start_s * 1000)
+            window_lo = int(start_s * 1000)
+            window_hi = int(end_s * 1000)
+            breaks = _scan_window(window_lo, window_hi, analyse_provider.analyse_host_reads)
             for br in breaks or []:
-                host_reads.append(offset_ad_break(br, offset_ms, source="host_read"))
+                shifted = offset_ad_break(br, window_lo, source="host_read")
+                clamped = clamp_ad_break(shifted, window_lo, window_hi)
+                if clamped is not None:
+                    host_reads.append(clamped)
 
         transcription_report.completed_at = datetime.utcnow().isoformat()
         analysis_report.completed_at = datetime.utcnow().isoformat()
