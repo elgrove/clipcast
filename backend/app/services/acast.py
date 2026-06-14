@@ -180,6 +180,19 @@ def compute_trailing_windows(
     return windows
 
 
+def offset_adverts(adverts: list[Advert], offset_ms: int) -> list[Advert]:
+    """Shift each advert's window-relative timestamps forward by ``offset_ms`` to
+    convert them back to absolute episode time."""
+
+    def shift(t: str) -> str:
+        return format_ms_to_time(parse_time_to_ms(t) + offset_ms)
+
+    return [
+        Advert(start_time=shift(a.start_time), end_time=shift(a.end_time), advert_for=a.advert_for)
+        for a in adverts
+    ]
+
+
 def offset_ad_break(br: AdBreak, offset_ms: int, source: str | None = None) -> AdBreak:
     """Shift a break (and its adverts) forward by ``offset_ms`` to convert
     window-relative timestamps back to absolute episode time, optionally
@@ -188,17 +201,9 @@ def offset_ad_break(br: AdBreak, offset_ms: int, source: str | None = None) -> A
     def shift(t: str) -> str:
         return format_ms_to_time(parse_time_to_ms(t) + offset_ms)
 
-    adverts = None
-    if br.adverts is not None:
-        adverts = [
-            Advert(
-                start_time=shift(a.start_time), end_time=shift(a.end_time), advert_for=a.advert_for
-            )
-            for a in br.adverts
-        ]
     return AdBreak(
         start_time=shift(br.start_time),
         end_time=shift(br.end_time),
-        adverts=adverts,
+        adverts=offset_adverts(br.adverts, offset_ms) if br.adverts is not None else None,
         source=source if source is not None else br.source,
     )

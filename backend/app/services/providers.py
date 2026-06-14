@@ -25,6 +25,7 @@ from app.models import (
     TranscriptionSegment,
 )
 from app.services.prompts import (
+    ANALYSE_ACAST_SECTION_PROMPT,
     ANALYSE_AD_BREAKS_PROMPT,
     ANALYSE_HOST_READ_PROMPT,
     REFINE_AD_END_PROMPT,
@@ -116,6 +117,16 @@ class AIProviderBase(ABC):
         follows an ad break. Timestamps are window-relative; the caller offsets
         them back to absolute episode time."""
 
+    @abstractmethod
+    def analyse_acast_section(
+        self,
+        transcription: Transcription,
+        report: AnalysisReport = None,
+    ) -> list[AdBreak]:
+        """Itemise the adverts within a window already known to be an ad break
+        (bracketed by Acast idents), for reporting. Timestamps are window-relative;
+        the caller offsets them back to absolute episode time."""
+
     def calculate_cost(self, input_tokens, output_tokens, model_config: AIModel):
         input_cost = (
             Decimal(input_tokens)
@@ -205,6 +216,15 @@ class GeminiProvider(AIProviderBase):
     ) -> list[AdBreak]:
         transcript_json = json.dumps(transcription.model_dump(), indent=2)
         prompt = ANALYSE_HOST_READ_PROMPT.format(transcript=transcript_json)
+        return self._run_analysis(prompt, report)
+
+    def analyse_acast_section(
+        self,
+        transcription: Transcription,
+        report: AnalysisReport = None,
+    ) -> list[AdBreak]:
+        transcript_json = json.dumps(transcription.model_dump(), indent=2)
+        prompt = ANALYSE_ACAST_SECTION_PROMPT.format(transcript=transcript_json)
         return self._run_analysis(prompt, report)
 
     def _run_analysis(self, prompt: str, report: AnalysisReport | None) -> list[AdBreak]:
@@ -382,6 +402,13 @@ class WhisperProvider(AIProviderBase):
     ) -> list[AdBreak]:
         raise NotImplementedError("WhisperProvider only supports transcription, not analysis")
 
+    def analyse_acast_section(
+        self,
+        transcription: Transcription,
+        report: AnalysisReport = None,
+    ) -> list[AdBreak]:
+        raise NotImplementedError("WhisperProvider only supports transcription, not analysis")
+
 
 class OpenAICompatibleProvider(AIProviderBase):
     """Shared base for any provider exposing an OpenAI-compatible Chat Completions API
@@ -450,6 +477,15 @@ class OpenAICompatibleProvider(AIProviderBase):
     ) -> list[AdBreak]:
         transcript_json = json.dumps(transcription.model_dump(), indent=2)
         prompt = ANALYSE_HOST_READ_PROMPT.format(transcript=transcript_json)
+        return self._run_analysis(prompt, report)
+
+    def analyse_acast_section(
+        self,
+        transcription: Transcription,
+        report: AnalysisReport = None,
+    ) -> list[AdBreak]:
+        transcript_json = json.dumps(transcription.model_dump(), indent=2)
+        prompt = ANALYSE_ACAST_SECTION_PROMPT.format(transcript=transcript_json)
         return self._run_analysis(prompt, report)
 
     def _run_analysis(self, prompt: str, report: AnalysisReport | None) -> list[AdBreak]:

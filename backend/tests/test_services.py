@@ -253,7 +253,7 @@ def test_queue_acast_chain_tasks(session, monkeypatch):
     assert captured == [
         "app.tasks.task_download",
         "app.tasks.task_detect_acast_ads",
-        "app.tasks.task_scan_acast_host_reads",
+        "app.tasks.task_scan_acast_ads",
         "app.tasks.task_edit",
     ], f"Got: {captured}"
 

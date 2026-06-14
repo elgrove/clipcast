@@ -206,7 +206,10 @@ class AppConfig(SQLModel, table=True):
     analysis_model_id: str | None = Field(default=None, foreign_key="ai_models.id")
     boundary_refinement_model_id: str | None = Field(default=None, foreign_key="ai_models.id")
     keep_raw_episodes: bool = Field(default=True)
-    scan_acast_host_reads: bool = Field(default=False)
+    # When on (default), Acast episodes get an AI pass after ident clipping: the
+    # jingle-bracketed ad sections are transcribed and itemised for reporting, and
+    # the content window after each break is scanned for host-read adverts to cut.
+    scan_acast_ads: bool = Field(default=True)
 
     transcription_model: AIModel | None = Relationship(
         sa_relationship_kwargs={
@@ -520,7 +523,7 @@ class ConfigRead(PydanticBaseModel):
     analysis_model_id: str | None
     boundary_refinement_model_id: str | None = None
     keep_raw_episodes: bool = True
-    scan_acast_host_reads: bool = False
+    scan_acast_ads: bool = True
     transcription_model: "AIModelRead | None" = None
     analysis_model: "AIModelRead | None" = None
     boundary_refinement_model: "AIModelRead | None" = None
@@ -531,7 +534,7 @@ class ConfigUpdate(PydanticBaseModel):
     analysis_model_id: str | None = None
     boundary_refinement_model_id: str | None = None
     keep_raw_episodes: bool | None = None
-    scan_acast_host_reads: bool | None = None
+    scan_acast_ads: bool | None = None
 
 
 class AIProviderRead(PydanticBaseModel):

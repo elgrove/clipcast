@@ -57,6 +57,26 @@ Transcript:
 {transcript}"""
 
 
+ANALYSE_ACAST_SECTION_PROMPT = """You are analysing a short transcript window that has ALREADY been identified as an advertising break in a podcast (it was bracketed by a podcast network's ad-break idents). The entire window is advertising — your job is to itemise WHICH advertisers appear in it, for reporting purposes.
+
+Identify each distinct advert in the window: programmatic/network spots, third-party sponsors, and any host-read or pre-recorded ads. Treat a change of advertiser, product, or offer as a new advert.
+
+Do NOT include:
+- The network ident/jingle itself (the short branded sting that brackets the break) — that is not an advert
+- Silence or dead air
+
+If the window contains no recognisable advert content, return an empty list of breaks.
+
+Timestamps in the transcript are in seconds, relative to the START of this window. Return adverts using those same window-relative timestamps.
+
+Return one break spanning the advertising you find, with:
+- start_time and end_time of the break
+- adverts: one entry per distinct advert, each with its own start_time, end_time, and advert_for (the company/product/service being advertised). Name the advertiser as specifically as the transcript allows.
+
+Transcript:
+{transcript}"""
+
+
 REFINE_AD_START_PROMPT = """You are listening to a short audio clip from a podcast.
 
 Somewhere in this clip, regular podcast content transitions into an advertisement. Your

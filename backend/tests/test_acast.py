@@ -14,6 +14,7 @@ from app.services.acast import (
     detect_idents,
     idents_to_ad_breaks,
     offset_ad_break,
+    offset_adverts,
     pair_idents,
 )
 from app.services.editor import format_ms_to_time, parse_time_to_ms
@@ -288,3 +289,32 @@ def test_offset_ad_break_preserves_source_when_not_overridden():
     shifted = offset_ad_break(br, offset_ms=5_000)
     assert shifted.source == "acast_ident"
     assert parse_time_to_ms(shifted.start_time) == 15_000
+
+
+# ── offset_adverts ────────────────────────────────────────────────────────────
+
+
+def test_offset_adverts_shifts_each_advert():
+    adverts = [
+        Advert(
+            start_time=format_ms_to_time(2_000),
+            end_time=format_ms_to_time(8_000),
+            advert_for="Shopify",
+        ),
+        Advert(
+            start_time=format_ms_to_time(10_000),
+            end_time=format_ms_to_time(15_000),
+            advert_for="Squarespace",
+        ),
+    ]
+    shifted = offset_adverts(adverts, offset_ms=60_000)
+
+    assert [a.advert_for for a in shifted] == ["Shopify", "Squarespace"]
+    assert parse_time_to_ms(shifted[0].start_time) == 62_000
+    assert parse_time_to_ms(shifted[0].end_time) == 68_000
+    assert parse_time_to_ms(shifted[1].start_time) == 70_000
+    assert parse_time_to_ms(shifted[1].end_time) == 75_000
+
+
+def test_offset_adverts_empty_list():
+    assert offset_adverts([], offset_ms=1_000) == []
