@@ -23,6 +23,9 @@ class AdBreak(PydanticBaseModel):
     start_time: str
     end_time: str
     adverts: list[Advert] | None = None
+    # Provenance: "acast_ident" (jingle fingerprint) or "host_read" (post-break
+    # AI scan). None for AI-mode breaks. Stored in JSON, so no migration needed.
+    source: str | None = None
 
 
 class TranscriptionSegment(PydanticBaseModel):
@@ -203,6 +206,7 @@ class AppConfig(SQLModel, table=True):
     analysis_model_id: str | None = Field(default=None, foreign_key="ai_models.id")
     boundary_refinement_model_id: str | None = Field(default=None, foreign_key="ai_models.id")
     keep_raw_episodes: bool = Field(default=True)
+    scan_acast_host_reads: bool = Field(default=False)
 
     transcription_model: AIModel | None = Relationship(
         sa_relationship_kwargs={
@@ -516,6 +520,7 @@ class ConfigRead(PydanticBaseModel):
     analysis_model_id: str | None
     boundary_refinement_model_id: str | None = None
     keep_raw_episodes: bool = True
+    scan_acast_host_reads: bool = False
     transcription_model: "AIModelRead | None" = None
     analysis_model: "AIModelRead | None" = None
     boundary_refinement_model: "AIModelRead | None" = None
@@ -526,6 +531,7 @@ class ConfigUpdate(PydanticBaseModel):
     analysis_model_id: str | None = None
     boundary_refinement_model_id: str | None = None
     keep_raw_episodes: bool | None = None
+    scan_acast_host_reads: bool | None = None
 
 
 class AIProviderRead(PydanticBaseModel):

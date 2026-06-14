@@ -26,8 +26,10 @@
 	let analysisModelId = $state('');
 	let boundaryRefinementModelId = $state('');
 	let keepRawEpisodes = $state(true);
+	let scanAcastHostReads = $state(false);
 	let savingConfig = $state(false);
 	let savingStorageSetting = $state(false);
+	let savingScanSetting = $state(false);
 
 	let modelModalOpen = $state(false);
 	let editingModel: AIModel | null = $state(null);
@@ -60,6 +62,7 @@
 			analysisModelId = cfg.analysis_model_id || '';
 			boundaryRefinementModelId = cfg.boundary_refinement_model_id || '';
 			keepRawEpisodes = cfg.keep_raw_episodes;
+			scanAcastHostReads = cfg.scan_acast_host_reads;
 		} catch (e: any) {
 			toasts.addToast('error', e.message || 'Failed to load config');
 		} finally {
@@ -98,6 +101,21 @@
 			toasts.addToast('error', e.message || 'Failed to save');
 		} finally {
 			savingStorageSetting = false;
+		}
+	}
+
+	async function handleSaveScanSetting() {
+		savingScanSetting = true;
+		try {
+			config = await updateConfig({
+				scan_acast_host_reads: scanAcastHostReads,
+			});
+			scanAcastHostReads = config.scan_acast_host_reads;
+			toasts.addToast('success', 'Ad detection setting saved');
+		} catch (e: any) {
+			toasts.addToast('error', e.message || 'Failed to save');
+		} finally {
+			savingScanSetting = false;
 		}
 	}
 
@@ -341,6 +359,31 @@
 					<span class="mt-0.5 block text-xs text-zinc-500 dark:text-zinc-400">
 						Preserve the original MP3 alongside the clipped version. Roughly doubles disk
 						usage but lets you re-edit episodes if ad detection changes.
+					</span>
+				</label>
+			</div>
+		</div>
+
+		<!-- Ad detection -->
+		<div class="rounded-xl border border-zinc-200 bg-white p-6 dark:border-zinc-800 dark:bg-zinc-900">
+			<h2 class="text-lg font-semibold text-zinc-900 dark:text-white">Ad detection</h2>
+			<div class="mt-4 flex items-start gap-3">
+				<input
+					id="scan-acast-host-reads"
+					type="checkbox"
+					bind:checked={scanAcastHostReads}
+					onchange={handleSaveScanSetting}
+					disabled={savingScanSetting}
+					class="mt-0.5 h-4 w-4 rounded border-zinc-300 text-emerald-600 focus:ring-emerald-500 disabled:opacity-50 dark:border-zinc-700 dark:bg-zinc-900"
+				/>
+				<label for="scan-acast-host-reads" class="flex-1 cursor-pointer">
+					<span class="block text-sm font-medium text-zinc-700 dark:text-zinc-300">
+						Scan for host-read ads after Acast breaks
+					</span>
+					<span class="mt-0.5 block text-xs text-zinc-500 dark:text-zinc-400">
+						After each jingle-detected Acast ad break, transcribe and analyse the next few
+						minutes for a host-read sponsor segment and remove it too. Uses the configured
+						transcription and analysis models, so it adds AI cost to Acast episodes.
 					</span>
 				</label>
 			</div>

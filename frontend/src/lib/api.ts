@@ -158,6 +158,7 @@ export async function updateConfig(
 		analysis_model_id: string | null;
 		boundary_refinement_model_id: string | null;
 		keep_raw_episodes: boolean;
+		scan_acast_host_reads: boolean;
 	}>
 ): Promise<Config> {
 	return fetchApi<Config>('/api/config', {

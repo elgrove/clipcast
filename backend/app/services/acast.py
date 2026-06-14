@@ -5,13 +5,20 @@ import numpy as np
 import scipy.signal
 from pydub import AudioSegment
 
-from app.models import AdBreak
+from app.models import AdBreak, Advert
+from app.services.editor import format_ms_to_time, parse_time_to_ms
 
 IDENT_PATH = Path(__file__).parent.parent / "assets/acast_ident.wav"
 SAMPLE_RATE = 16_000
 THRESHOLD = 0.80
 MIN_PAIR_GAP_S = 15
 MAX_PAIR_GAP_S = 720  # 12 min
+
+# Host-read scan: hosts often read a baked-in sponsor segment in the content
+# shortly after a jingle-delineated ad break. Scan this much audio after each
+# break's end for one; skip windows too short to plausibly contain an advert.
+HOST_READ_WINDOW_S = 300
+MIN_HOST_READ_WINDOW_S = 20
 
 
 def acast_feed_url_heuristic(feed_url: str) -> bool:
@@ -144,6 +151,54 @@ def idents_to_ad_breaks(
                 start_time=_format_time(first[0]),
                 end_time=_format_time(second[1]),
                 adverts=None,
+                source="acast_ident",
             )
         )
     return breaks
+
+
+def compute_trailing_windows(
+    ident_breaks: list[AdBreak],
+    audio_duration_s: float,
+    window_s: float = HOST_READ_WINDOW_S,
+    min_window_s: float = MIN_HOST_READ_WINDOW_S,
+) -> list[tuple[float, float]]:
+    """Absolute (start, end) windows, in seconds, of content to scan for a
+    host-read advert after each ident break. Each window runs from a break's
+    end to ``window_s`` later, clamped to the audio end and to the next break's
+    start so it never reaches into the following programmatic break. Windows
+    shorter than ``min_window_s`` are dropped."""
+    breaks = sorted(ident_breaks, key=lambda b: parse_time_to_ms(b.start_time))
+    windows: list[tuple[float, float]] = []
+    for i, br in enumerate(breaks):
+        start = parse_time_to_ms(br.end_time) / 1000.0
+        end = min(start + window_s, audio_duration_s)
+        if i + 1 < len(breaks):
+            end = min(end, parse_time_to_ms(breaks[i + 1].start_time) / 1000.0)
+        if end - start >= min_window_s:
+            windows.append((start, end))
+    return windows
+
+
+def offset_ad_break(br: AdBreak, offset_ms: int, source: str | None = None) -> AdBreak:
+    """Shift a break (and its adverts) forward by ``offset_ms`` to convert
+    window-relative timestamps back to absolute episode time, optionally
+    overriding the break's ``source`` tag."""
+
+    def shift(t: str) -> str:
+        return format_ms_to_time(parse_time_to_ms(t) + offset_ms)
+
+    adverts = None
+    if br.adverts is not None:
+        adverts = [
+            Advert(
+                start_time=shift(a.start_time), end_time=shift(a.end_time), advert_for=a.advert_for
+            )
+            for a in br.adverts
+        ]
+    return AdBreak(
+        start_time=shift(br.start_time),
+        end_time=shift(br.end_time),
+        adverts=adverts,
+        source=source if source is not None else br.source,
+    )

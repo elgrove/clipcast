@@ -2,16 +2,30 @@ import numpy as np
 import pytest
 from pydub import AudioSegment
 
+from app.models import AdBreak, Advert
 from app.services.acast import (
     IDENT_PATH,
     MAX_PAIR_GAP_S,
+    MIN_HOST_READ_WINDOW_S,
     MIN_PAIR_GAP_S,
     SAMPLE_RATE,
     acast_feed_url_heuristic,
+    compute_trailing_windows,
     detect_idents,
     idents_to_ad_breaks,
+    offset_ad_break,
     pair_idents,
 )
+from app.services.editor import format_ms_to_time, parse_time_to_ms
+
+
+def _break_s(start_s: float, end_s: float, source: str = "acast_ident") -> AdBreak:
+    return AdBreak(
+        start_time=format_ms_to_time(int(start_s * 1000)),
+        end_time=format_ms_to_time(int(end_s * 1000)),
+        source=source,
+    )
+
 
 # ── URL heuristic ────────────────────────────────────────────────────────────
 
@@ -134,6 +148,7 @@ def test_idents_to_ad_breaks_cut_span():
     assert len(breaks) == 1
     br = breaks[0]
     assert br.adverts is None
+    assert br.source == "acast_ident"
     # Cut spans start-of-opening-ident to end-of-closing-ident so no jingle audio survives.
     assert br.start_time == "00:00:10.000"
     assert br.end_time == "00:01:33.000"
@@ -195,3 +210,81 @@ def test_detect_idents_synthetic(tmp_path):
         assert abs(start_s - target_s) <= 0.25, (
             f"Detected ident at {start_s:.3f}s, expected ~{target_s}s"
         )
+
+
+# ── compute_trailing_windows ──────────────────────────────────────────────────
+
+
+def test_trailing_window_mid_episode():
+    # Break ends at 90s, episode is long → full 300s window after it.
+    windows = compute_trailing_windows([_break_s(60, 90)], audio_duration_s=3600)
+    assert windows == [(90.0, 390.0)]
+
+
+def test_trailing_window_clamped_to_audio_end():
+    windows = compute_trailing_windows([_break_s(60, 90)], audio_duration_s=200)
+    assert windows == [(90.0, 200.0)]
+
+
+def test_trailing_window_clamped_to_next_break():
+    # First window must stop at the next break's opening, not reach into it.
+    breaks = [_break_s(60, 90), _break_s(120, 150)]
+    windows = compute_trailing_windows(breaks, audio_duration_s=3600)
+    assert windows == [(90.0, 120.0), (150.0, 450.0)]
+
+
+def test_trailing_window_dropped_when_too_short():
+    # Only 10s of content after the break → below MIN_HOST_READ_WINDOW_S.
+    windows = compute_trailing_windows([_break_s(60, 90)], audio_duration_s=100)
+    assert windows == []
+
+
+def test_trailing_window_kept_at_exact_minimum():
+    windows = compute_trailing_windows(
+        [_break_s(60, 90)], audio_duration_s=90 + MIN_HOST_READ_WINDOW_S
+    )
+    assert windows == [(90.0, 90.0 + MIN_HOST_READ_WINDOW_S)]
+
+
+def test_trailing_window_empty_breaks():
+    assert compute_trailing_windows([], audio_duration_s=3600) == []
+
+
+def test_trailing_window_unsorted_breaks_sorted_first():
+    breaks = [_break_s(120, 150), _break_s(60, 90)]
+    windows = compute_trailing_windows(breaks, audio_duration_s=3600)
+    assert windows == [(90.0, 120.0), (150.0, 450.0)]
+
+
+# ── offset_ad_break ───────────────────────────────────────────────────────────
+
+
+def test_offset_ad_break_shifts_break_and_adverts():
+    window_relative = AdBreak(
+        start_time=format_ms_to_time(10_000),
+        end_time=format_ms_to_time(40_000),
+        adverts=[
+            Advert(
+                start_time=format_ms_to_time(12_000),
+                end_time=format_ms_to_time(38_000),
+                advert_for="Brand",
+            )
+        ],
+        source=None,
+    )
+    shifted = offset_ad_break(window_relative, offset_ms=90_000, source="host_read")
+
+    assert parse_time_to_ms(shifted.start_time) == 100_000
+    assert parse_time_to_ms(shifted.end_time) == 130_000
+    assert shifted.source == "host_read"
+    assert shifted.adverts is not None
+    assert parse_time_to_ms(shifted.adverts[0].start_time) == 102_000
+    assert parse_time_to_ms(shifted.adverts[0].end_time) == 128_000
+    assert shifted.adverts[0].advert_for == "Brand"
+
+
+def test_offset_ad_break_preserves_source_when_not_overridden():
+    br = _break_s(10, 20, source="acast_ident")
+    shifted = offset_ad_break(br, offset_ms=5_000)
+    assert shifted.source == "acast_ident"
+    assert parse_time_to_ms(shifted.start_time) == 15_000
