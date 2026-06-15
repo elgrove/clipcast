@@ -14,10 +14,15 @@ THRESHOLD = 0.80
 MIN_PAIR_GAP_S = 15
 MAX_PAIR_GAP_S = 720  # 12 min
 
-# Host-read scan: hosts often read a baked-in sponsor segment in the content
-# shortly after a jingle-delineated ad break. Scan this much audio after each
-# break's end for one; skip windows too short to plausibly contain an advert.
-HOST_READ_WINDOW_S = 300
+# Host-read scan: a baked-in sponsor segment can sit in the content just after
+# a jingle-delineated break (trailing) or lead straight into one (leading) —
+# either way it falls outside the jingle bracket. Scan a window of content on
+# each side of every break for one; skip windows too short to plausibly contain
+# an advert. The windows are kept fairly tight: scanning deep into content
+# invites false positives (e.g. a brand-heavy show segment being mistaken for a
+# host read), so a host read is only sought close to a break boundary.
+HOST_READ_WINDOW_S = 120
+LEADING_HOST_READ_WINDOW_S = 120
 MIN_HOST_READ_WINDOW_S = 20
 
 
@@ -178,6 +183,44 @@ def compute_trailing_windows(
         if end - start >= min_window_s:
             windows.append((start, end))
     return windows
+
+
+def compute_leading_windows(
+    ident_breaks: list[AdBreak],
+    window_s: float = LEADING_HOST_READ_WINDOW_S,
+    min_window_s: float = MIN_HOST_READ_WINDOW_S,
+) -> list[tuple[float, float]]:
+    """Absolute (start, end) windows, in seconds, of content to scan for a
+    host-read advert that leads INTO each ident break. Each window runs from
+    ``window_s`` before a break's start up to that start, clamped to 0 and to
+    the previous break's end so it never reaches back into the preceding
+    programmatic break. Windows shorter than ``min_window_s`` are dropped."""
+    breaks = sorted(ident_breaks, key=lambda b: parse_time_to_ms(b.start_time))
+    windows: list[tuple[float, float]] = []
+    for i, br in enumerate(breaks):
+        end = parse_time_to_ms(br.start_time) / 1000.0
+        start = max(0.0, end - window_s)
+        if i > 0:
+            start = max(start, parse_time_to_ms(breaks[i - 1].end_time) / 1000.0)
+        if end - start >= min_window_s:
+            windows.append((start, end))
+    return windows
+
+
+def merge_scan_windows(windows: list[tuple[float, float]]) -> list[tuple[float, float]]:
+    """Merge overlapping or touching (start, end) windows into a minimal set.
+    Leading and trailing windows of adjacent breaks can overlap when the breaks
+    are close together; merging avoids transcribing the same content twice and
+    keeps each detected advert from being reported from two windows at once."""
+    ordered = sorted(windows)
+    merged: list[tuple[float, float]] = []
+    for start, end in ordered:
+        if merged and start <= merged[-1][1]:
+            prev_start, prev_end = merged[-1]
+            merged[-1] = (prev_start, max(prev_end, end))
+        else:
+            merged.append((start, end))
+    return merged
 
 
 def offset_adverts(adverts: list[Advert], offset_ms: int) -> list[Advert]:

@@ -4,7 +4,9 @@ from pydub import AudioSegment
 
 from app.models import AdBreak, Advert
 from app.services.acast import (
+    HOST_READ_WINDOW_S,
     IDENT_PATH,
+    LEADING_HOST_READ_WINDOW_S,
     MAX_PAIR_GAP_S,
     MIN_HOST_READ_WINDOW_S,
     MIN_PAIR_GAP_S,
@@ -12,9 +14,11 @@ from app.services.acast import (
     acast_feed_url_heuristic,
     clamp_ad_break,
     clamp_adverts,
+    compute_leading_windows,
     compute_trailing_windows,
     detect_idents,
     idents_to_ad_breaks,
+    merge_scan_windows,
     offset_ad_break,
     offset_adverts,
     pair_idents,
@@ -219,9 +223,9 @@ def test_detect_idents_synthetic(tmp_path):
 
 
 def test_trailing_window_mid_episode():
-    # Break ends at 90s, episode is long → full 300s window after it.
+    # Break ends at 90s, episode is long → full window after it.
     windows = compute_trailing_windows([_break_s(60, 90)], audio_duration_s=3600)
-    assert windows == [(90.0, 390.0)]
+    assert windows == [(90.0, 90.0 + HOST_READ_WINDOW_S)]
 
 
 def test_trailing_window_clamped_to_audio_end():
@@ -233,7 +237,7 @@ def test_trailing_window_clamped_to_next_break():
     # First window must stop at the next break's opening, not reach into it.
     breaks = [_break_s(60, 90), _break_s(120, 150)]
     windows = compute_trailing_windows(breaks, audio_duration_s=3600)
-    assert windows == [(90.0, 120.0), (150.0, 450.0)]
+    assert windows == [(90.0, 120.0), (150.0, 150.0 + HOST_READ_WINDOW_S)]
 
 
 def test_trailing_window_dropped_when_too_short():
@@ -253,10 +257,72 @@ def test_trailing_window_empty_breaks():
     assert compute_trailing_windows([], audio_duration_s=3600) == []
 
 
+# ── compute_leading_windows ───────────────────────────────────────────────────
+
+
+def test_leading_window_mid_episode():
+    # Break starts at 600s, plenty of lead-in → full window before it.
+    windows = compute_leading_windows([_break_s(600, 630)])
+    assert windows == [(600.0 - LEADING_HOST_READ_WINDOW_S, 600.0)]
+
+
+def test_leading_window_clamped_to_episode_start():
+    # Break near the top of the episode → window can't precede 0.
+    windows = compute_leading_windows([_break_s(60, 90)])
+    assert windows == [(0.0, 60.0)]
+
+
+def test_leading_window_clamped_to_previous_break():
+    # The lead-in scan must not reach back into the previous programmatic break.
+    breaks = [_break_s(60, 90), _break_s(150, 180)]
+    windows = compute_leading_windows(breaks)
+    # Break 1: lead-in [0, 60]. Break 2: 150 - 120 = 30 < prev end 90, so it
+    # starts at the previous break's end, not 30.
+    assert windows == [(0.0, 60.0), (90.0, 150.0)]
+
+
+def test_leading_window_dropped_when_too_short():
+    # Only 10s between the previous break's end and this break's start.
+    breaks = [_break_s(60, 90), _break_s(100, 130)]
+    windows = compute_leading_windows(breaks)
+    assert windows == [(0.0, 60.0)]
+
+
+def test_leading_window_empty_breaks():
+    assert compute_leading_windows([]) == []
+
+
+# ── merge_scan_windows ────────────────────────────────────────────────────────
+
+
+def test_merge_scan_windows_disjoint_kept_separate():
+    assert merge_scan_windows([(90.0, 210.0), (300.0, 420.0)]) == [
+        (90.0, 210.0),
+        (300.0, 420.0),
+    ]
+
+
+def test_merge_scan_windows_overlapping_merged():
+    # A trailing window and the next break's leading window overlapping (close
+    # breaks) collapse into one so the gap is scanned once, not twice.
+    assert merge_scan_windows([(90.0, 210.0), (180.0, 300.0)]) == [(90.0, 300.0)]
+
+
+def test_merge_scan_windows_touching_merged():
+    assert merge_scan_windows([(90.0, 150.0), (150.0, 270.0)]) == [(90.0, 270.0)]
+
+
+def test_merge_scan_windows_unsorted_input():
+    assert merge_scan_windows([(300.0, 360.0), (90.0, 120.0)]) == [
+        (90.0, 120.0),
+        (300.0, 360.0),
+    ]
+
+
 def test_trailing_window_unsorted_breaks_sorted_first():
     breaks = [_break_s(120, 150), _break_s(60, 90)]
     windows = compute_trailing_windows(breaks, audio_duration_s=3600)
-    assert windows == [(90.0, 120.0), (150.0, 450.0)]
+    assert windows == [(90.0, 120.0), (150.0, 150.0 + HOST_READ_WINDOW_S)]
 
 
 # ── offset_ad_break ───────────────────────────────────────────────────────────

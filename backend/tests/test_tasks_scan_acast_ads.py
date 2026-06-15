@@ -120,6 +120,7 @@ class _StubProvider:
         self.transcribe_calls = 0
         self.host_read_calls = 0
         self.section_calls = 0
+        self.host_read_instructions: list[str | None] = []
 
     def transcribe(self, audio_path, report=None):
         self.transcribe_calls += 1
@@ -133,8 +134,9 @@ class _StubProvider:
             segments=[TranscriptionSegment(start_time=0.0, end_time=100.0, text="hello")]
         )
 
-    def analyse_host_reads(self, transcription, report=None):
+    def analyse_host_reads(self, transcription, report=None, custom_instructions=None):
         self.host_read_calls += 1
+        self.host_read_instructions.append(custom_instructions)
         if report is not None:
             report.input_tokens = (report.input_tokens or 0) + 200
             report.output_tokens = (report.output_tokens or 0) + 20
@@ -257,15 +259,21 @@ def test_scan_reports_section_and_appends_host_read(session, monkeypatch):
     session.refresh(episode)
     session.refresh(report)
 
-    # One section transcription + one window transcription.
-    assert stub.transcribe_calls == 2
+    # Section transcription + a leading window (before the break) + a trailing
+    # window (after it) → 3 transcriptions, 2 host-read analyses.
+    assert stub.transcribe_calls == 3
     assert stub.section_calls == 1
-    assert stub.host_read_calls == 1
+    assert stub.host_read_calls == 2
 
     breaks = episode.ad_breaks
-    assert len(breaks) == 2
+    assert len(breaks) == 3
     ident = next(b for b in breaks if b.source == "acast_ident")
-    host = next(b for b in breaks if b.source == "host_read")
+    hosts = sorted(
+        (b for b in breaks if b.source == "host_read"),
+        key=lambda b: parse_time_to_ms(b.start_time),
+    )
+    assert len(hosts) == 2
+    leading, trailing = hosts
 
     # Section advert reported at absolute time (60s + 5s/25s → 65s/85s).
     assert ident.adverts is not None
@@ -273,15 +281,18 @@ def test_scan_reports_section_and_appends_host_read(session, monkeypatch):
     assert parse_time_to_ms(ident.adverts[0].start_time) == 65_000
     assert parse_time_to_ms(ident.adverts[0].end_time) == 85_000
 
-    # Host read offset to absolute (90s + 10s/40s → 100s/130s).
-    assert parse_time_to_ms(host.start_time) == 100_000
-    assert parse_time_to_ms(host.end_time) == 130_000
-    assert host.adverts is not None
-    assert parse_time_to_ms(host.adverts[0].start_time) == 100_000
+    # Leading window is [0s, 60s] → the read 10s-40s in stays at 10s/40s.
+    assert parse_time_to_ms(leading.start_time) == 10_000
+    assert parse_time_to_ms(leading.end_time) == 40_000
+    # Trailing window starts at 90s → the read is offset to 100s/130s.
+    assert parse_time_to_ms(trailing.start_time) == 100_000
+    assert parse_time_to_ms(trailing.end_time) == 130_000
+    assert trailing.adverts is not None
+    assert parse_time_to_ms(trailing.adverts[0].start_time) == 100_000
 
     assert report.refined_at is not None
     assert "reported ads in 1/1 section(s)" in report.logs
-    assert "1 host-read(s) found" in report.logs
+    assert "2 host-read(s) found" in report.logs
     assert report.refinement_report is not None
     assert report.refinement_report.cost_usd and report.refinement_report.cost_usd > 0
 
@@ -325,8 +336,9 @@ def test_scan_short_tail_still_reports_section(session, monkeypatch):
     _align_task_engine(monkeypatch)
     _configure_models(session, enabled=True)
 
-    # 100s episode, break ends at 90s → 10s tail, below the minimum window.
-    episode = _make_acast_episode(session, duration_ms=100_000, breaks=[(60_000, 90_000)])
+    # 100s episode, pre-roll break 0s-90s → no leading window (break at the
+    # start) and only a 10s tail, below the minimum trailing window.
+    episode = _make_acast_episode(session, duration_ms=100_000, breaks=[(0, 90_000)])
     report = _make_report(session, episode)
 
     section = AdBreak(
@@ -371,13 +383,13 @@ def test_scan_idempotent_on_second_run(session, monkeypatch):
 
     task_scan_acast_ads.apply(args=[episode.id, report.id]).get()
     first_transcribe = stub.transcribe_calls
-    assert first_transcribe == 2  # section + window
+    assert first_transcribe == 3  # section + leading + trailing windows
 
     task_scan_acast_ads.apply(args=[episode.id, report.id]).get()
 
     session.refresh(episode)
     assert stub.transcribe_calls == first_transcribe, "second run should short-circuit"
-    assert sum(1 for b in episode.ad_breaks if b.source == "host_read") == 1
+    assert sum(1 for b in episode.ad_breaks if b.source == "host_read") == 2
 
 
 def test_scan_clamps_overshooting_results_to_their_slice(session, monkeypatch):
@@ -411,14 +423,22 @@ def test_scan_clamps_overshooting_results_to_their_slice(session, monkeypatch):
 
     session.refresh(episode)
     ident = next(b for b in episode.ad_breaks if b.source == "acast_ident")
-    host = next(b for b in episode.ad_breaks if b.source == "host_read")
+    hosts = sorted(
+        (b for b in episode.ad_breaks if b.source == "host_read"),
+        key=lambda b: parse_time_to_ms(b.start_time),
+    )
+    leading, trailing = hosts
 
     # Section advert clamped to the section end (90s).
     assert parse_time_to_ms(ident.adverts[0].end_time) == 90_000
-    # Host-read break (a real cut) clamped to the window end (200s).
-    assert parse_time_to_ms(host.start_time) == 100_000
-    assert parse_time_to_ms(host.end_time) == 200_000
-    assert parse_time_to_ms(host.adverts[0].end_time) == 200_000
+    # Each host read (a real cut) is clamped to its own window's bounds: the
+    # leading window ends at the break start (60s), the trailing window at the
+    # episode end (200s).
+    assert parse_time_to_ms(leading.end_time) == 60_000
+    assert parse_time_to_ms(leading.adverts[0].end_time) == 60_000
+    assert parse_time_to_ms(trailing.start_time) == 100_000
+    assert parse_time_to_ms(trailing.end_time) == 200_000
+    assert parse_time_to_ms(trailing.adverts[0].end_time) == 200_000
 
 
 def test_scan_skips_section_transcription_when_already_reported(session, monkeypatch):
@@ -448,7 +468,69 @@ def test_scan_skips_section_transcription_when_already_reported(session, monkeyp
     task_scan_acast_ads.apply(args=[episode.id, report.id]).get()
 
     session.refresh(episode)
-    # No section transcription (already reported); only the trailing window.
+    # No section transcription (already reported); only the scan windows.
     assert stub.section_calls == 0
     ident = next(b for b in episode.ad_breaks if b.source == "acast_ident")
     assert ident.adverts[0].advert_for == "Existing"
+
+
+def test_scan_catches_host_read_leading_into_break(session, monkeypatch):
+    """Regression: a host read that airs just BEFORE an ident break (leading into
+    it) is scanned and cut. Previously only the window AFTER each break was
+    scanned, so a sponsor read leading into a jingle break survived the clip."""
+    from app.tasks import task_scan_acast_ads
+
+    _align_task_engine(monkeypatch)
+    _configure_models(session, enabled=True)
+
+    # Mid-episode break 300s-330s in a 600s episode → a leading window (before
+    # 300s) and a trailing window (after 330s) are both scanned.
+    episode = _make_acast_episode(session, duration_ms=600_000, breaks=[(300_000, 330_000)])
+    report = _make_report(session, episode)
+
+    host_read = AdBreak(
+        start_time=format_ms_to_time(10_000),
+        end_time=format_ms_to_time(40_000),
+        adverts=[_advert(10_000, 40_000, "Contentful")],
+    )
+    stub = _StubProvider(host_reads=[host_read])
+    _patch_provider(monkeypatch, stub)
+
+    task_scan_acast_ads.apply(args=[episode.id, report.id]).get()
+    session.refresh(episode)
+
+    hosts = sorted(
+        (b for b in episode.ad_breaks if b.source == "host_read"),
+        key=lambda b: parse_time_to_ms(b.start_time),
+    )
+    # Leading window [180s, 300s]: read 10s in → 190s-220s, before the break.
+    # Trailing window [330s, 450s]: read 10s in → 340s-370s.
+    assert [parse_time_to_ms(b.start_time) for b in hosts] == [190_000, 340_000]
+    # The lead-in read ends before the break starts — the case that used to slip.
+    assert parse_time_to_ms(hosts[0].end_time) == 220_000
+    assert parse_time_to_ms(hosts[0].end_time) <= 300_000
+
+
+def test_scan_passes_podcast_custom_prompt_to_host_read_scan(session, monkeypatch):
+    """A podcast's custom_prompt is forwarded to the host-read analysis so
+    per-show guidance (e.g. 'never clip the eBay game segment') is applied during
+    the Acast scan — previously the scan ignored custom instructions entirely."""
+    from app.tasks import task_scan_acast_ads
+
+    _align_task_engine(monkeypatch)
+    _configure_models(session, enabled=True)
+
+    episode = _make_acast_episode(session, duration_ms=600_000, breaks=[(300_000, 330_000)])
+    instruction = "The eBay 'head-to-head second hand' game is content, not an advert."
+    episode.podcast.custom_prompt = instruction
+    session.add(episode.podcast)
+    session.commit()
+    report = _make_report(session, episode)
+
+    stub = _StubProvider(host_reads=[])
+    _patch_provider(monkeypatch, stub)
+
+    task_scan_acast_ads.apply(args=[episode.id, report.id]).get()
+
+    # Both scan windows (leading + trailing) received the per-podcast prompt.
+    assert stub.host_read_instructions == [instruction, instruction]
