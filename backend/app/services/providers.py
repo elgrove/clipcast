@@ -112,10 +112,13 @@ class AIProviderBase(ABC):
         self,
         transcription: Transcription,
         report: AnalysisReport = None,
+        custom_instructions: str | None = None,
     ) -> list[AdBreak]:
-        """Find host-read third-party adverts in a short window of content that
-        follows an ad break. Timestamps are window-relative; the caller offsets
-        them back to absolute episode time."""
+        """Find host-read third-party adverts in a short window of content
+        adjacent to an ad break (before or after it). ``custom_instructions``
+        carries per-podcast guidance (e.g. segments to never treat as ads).
+        Timestamps are window-relative; the caller offsets them back to absolute
+        episode time."""
 
     @abstractmethod
     def analyse_acast_section(
@@ -213,9 +216,12 @@ class GeminiProvider(AIProviderBase):
         self,
         transcription: Transcription,
         report: AnalysisReport = None,
+        custom_instructions: str | None = None,
     ) -> list[AdBreak]:
         transcript_json = json.dumps(transcription.model_dump(), indent=2)
         prompt = ANALYSE_HOST_READ_PROMPT.format(transcript=transcript_json)
+        if custom_instructions:
+            prompt += f"\n\nAdditional instructions:\n{custom_instructions}"
         return self._run_analysis(prompt, report)
 
     def analyse_acast_section(
@@ -267,9 +273,7 @@ class GeminiProvider(AIProviderBase):
         or None if the model couldn't determine it (or returned an unparseable
         response). The caller is responsible for converting the offset back to
         absolute episode time and clamping out-of-window responses."""
-        logger.info(
-            "Refining %s boundary with Gemini model %s", direction, self.model_config.name
-        )
+        logger.info("Refining %s boundary with Gemini model %s", direction, self.model_config.name)
 
         client = genai.Client(
             api_key=self.api_key,
@@ -399,6 +403,7 @@ class WhisperProvider(AIProviderBase):
         self,
         transcription: Transcription,
         report: AnalysisReport = None,
+        custom_instructions: str | None = None,
     ) -> list[AdBreak]:
         raise NotImplementedError("WhisperProvider only supports transcription, not analysis")
 
@@ -474,9 +479,12 @@ class OpenAICompatibleProvider(AIProviderBase):
         self,
         transcription: Transcription,
         report: AnalysisReport = None,
+        custom_instructions: str | None = None,
     ) -> list[AdBreak]:
         transcript_json = json.dumps(transcription.model_dump(), indent=2)
         prompt = ANALYSE_HOST_READ_PROMPT.format(transcript=transcript_json)
+        if custom_instructions:
+            prompt += f"\n\nAdditional instructions:\n{custom_instructions}"
         return self._run_analysis(prompt, report)
 
     def analyse_acast_section(

@@ -548,7 +548,9 @@ def task_scan_acast_ads(self, episode_id: str, report_id: str) -> None:
     from app.services.acast import (
         clamp_ad_break,
         clamp_adverts,
+        compute_leading_windows,
         compute_trailing_windows,
+        merge_scan_windows,
         offset_ad_break,
         offset_adverts,
     )
@@ -587,6 +589,7 @@ def task_scan_acast_ads(self, episode_id: str, report_id: str) -> None:
 
         existing = list(episode.ad_breaks)
         ident_breaks = [b for b in existing if b.source == "acast_ident"]
+        host_read_instructions = episode.podcast.custom_prompt or None
         audio_path = episode.mp3_path
         ad_breaks_path = episode.ad_breaks_path
         transcription_provider_name = config.transcription_model.provider.kind
@@ -683,12 +686,25 @@ def task_scan_acast_ads(self, episode_id: str, report_id: str) -> None:
                 )
             )
 
-        # 2. Scan the content window after each break for host-read adverts.
-        windows = compute_trailing_windows(ident_breaks, audio_duration_s)
+        # 2. Scan the content around each break for host-read adverts: the
+        #    window AFTER each break (trailing) and the window BEFORE it
+        #    (leading). A host read can either follow a break or lead into the
+        #    next jingle; the leading pass catches reads that air just before an
+        #    ident bracket and so fall outside every trailing window.
+        windows = merge_scan_windows(
+            compute_trailing_windows(ident_breaks, audio_duration_s)
+            + compute_leading_windows(ident_breaks)
+        )
         for start_s, end_s in windows:
             window_lo = int(start_s * 1000)
             window_hi = int(end_s * 1000)
-            breaks = _scan_window(window_lo, window_hi, analyse_provider.analyse_host_reads)
+            breaks = _scan_window(
+                window_lo,
+                window_hi,
+                lambda transcription, sub: analyse_provider.analyse_host_reads(
+                    transcription, sub, custom_instructions=host_read_instructions
+                ),
+            )
             for br in breaks or []:
                 shifted = offset_ad_break(br, window_lo, source="host_read")
                 clamped = clamp_ad_break(shifted, window_lo, window_hi)
