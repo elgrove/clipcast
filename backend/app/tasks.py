@@ -550,10 +550,13 @@ def task_scan_acast_ads(self, episode_id: str, report_id: str) -> None:
         clamp_adverts,
         compute_leading_windows,
         compute_trailing_windows,
+        expected_acast_breaks,
+        merge_fallback_breaks,
         merge_scan_windows,
         offset_ad_break,
         offset_adverts,
     )
+    from app.services.analysis import analyse_transcription
 
     with Session(engine) as session:
         report = session.get(ClippingReport, report_id)
@@ -656,63 +659,105 @@ def task_scan_acast_ads(self, episode_id: str, report_id: str) -> None:
     reported_idents: list[AdBreak] = []
     host_reads: list[AdBreak] = []
     sections_reported = 0
+    windows: list[tuple[float, float]] = []
+    fallback_breaks: list[AdBreak] | None = None
+    fallback_ai_count = 0
     try:
         with open(audio_path, "rb") as fh:
             audio = AudioSegment.from_file(fh, format="mp3")
         audio_duration_s = len(audio) / 1000.0
 
-        # 1. Report the adverts inside each ident-bracketed section.
-        for br in ident_breaks:
-            if br.adverts:
-                reported_idents.append(br)
-                continue
-            start_ms = parse_time_to_ms(br.start_time)
-            end_ms = parse_time_to_ms(br.end_time)
-            adverts: list[Advert] = []
-            if end_ms > start_ms:
-                breaks = _scan_window(start_ms, end_ms, analyse_provider.analyse_acast_section)
-                for found in breaks or []:
-                    if found.adverts:
-                        adverts.extend(offset_adverts(found.adverts, start_ms))
-                adverts = clamp_adverts(adverts, start_ms, end_ms)
-            if adverts:
-                sections_reported += 1
-            reported_idents.append(
-                AdBreak(
-                    start_time=br.start_time,
-                    end_time=br.end_time,
-                    adverts=adverts or None,
-                    source="acast_ident",
+        expected = expected_acast_breaks(audio_duration_s)
+        if len(ident_breaks) < expected:
+            # Too few jingle-bracketed breaks for an episode this long — its ads
+            # are likely host-read or inserted without the Acast jingle. Transcribe
+            # and analyse the whole episode to recover the breaks with no jingle to
+            # anchor on, then merge with the precise ident boundaries.
+            _log_report(
+                report_id,
+                f"Acast low-confidence: {len(ident_breaks)} ident break(s) < "
+                f"{expected} expected for {audio_duration_s / 60:.0f}min — "
+                "running whole-episode AI pass",
+            )
+            full_transcription = TranscriptionReport()
+            transcription = transcribe_provider.transcribe(audio_path, full_transcription)
+            _accumulate(full_transcription, AnalysisReport())
+            ai_breaks: list[AdBreak] = []
+            if transcription.segments:
+                full_analysis = AnalysisReport()
+                detected = analyse_transcription(
+                    transcription.segments,
+                    analyse_provider,
+                    full_analysis,
+                    custom_instructions=host_read_instructions,
                 )
-            )
+                _accumulate(TranscriptionReport(), full_analysis)
+                ai_breaks = [
+                    AdBreak(
+                        start_time=b.start_time,
+                        end_time=b.end_time,
+                        adverts=b.adverts,
+                        source="ai_fallback",
+                    )
+                    for b in detected
+                ]
+            fallback_ai_count = len(ai_breaks)
+            fallback_breaks = merge_fallback_breaks(ident_breaks, ai_breaks)
+            transcription_report.completed_at = datetime.utcnow().isoformat()
+            analysis_report.completed_at = datetime.utcnow().isoformat()
+        else:
+            # 1. Report the adverts inside each ident-bracketed section.
+            for br in ident_breaks:
+                if br.adverts:
+                    reported_idents.append(br)
+                    continue
+                start_ms = parse_time_to_ms(br.start_time)
+                end_ms = parse_time_to_ms(br.end_time)
+                adverts: list[Advert] = []
+                if end_ms > start_ms:
+                    breaks = _scan_window(start_ms, end_ms, analyse_provider.analyse_acast_section)
+                    for found in breaks or []:
+                        if found.adverts:
+                            adverts.extend(offset_adverts(found.adverts, start_ms))
+                    adverts = clamp_adverts(adverts, start_ms, end_ms)
+                if adverts:
+                    sections_reported += 1
+                reported_idents.append(
+                    AdBreak(
+                        start_time=br.start_time,
+                        end_time=br.end_time,
+                        adverts=adverts or None,
+                        source="acast_ident",
+                    )
+                )
 
-        # 2. Scan the content around each break for host-read adverts: the
-        #    window AFTER each break (trailing) and the window BEFORE it
-        #    (leading). A host read can either follow a break or lead into the
-        #    next jingle; the leading pass catches reads that air just before an
-        #    ident bracket and so fall outside every trailing window.
-        windows = merge_scan_windows(
-            compute_trailing_windows(ident_breaks, audio_duration_s)
-            + compute_leading_windows(ident_breaks)
-        )
-        for start_s, end_s in windows:
-            window_lo = int(start_s * 1000)
-            window_hi = int(end_s * 1000)
-            breaks = _scan_window(
-                window_lo,
-                window_hi,
-                lambda transcription, sub: analyse_provider.analyse_host_reads(
-                    transcription, sub, custom_instructions=host_read_instructions
-                ),
+            # 2. Scan the content around each break for host-read adverts: the
+            #    window AFTER each break (trailing) and the window BEFORE it
+            #    (leading). A host read can either follow a break or lead into
+            #    the next jingle; the leading pass catches reads that air just
+            #    before an ident bracket and so fall outside every trailing window.
+            windows = merge_scan_windows(
+                compute_trailing_windows(ident_breaks, audio_duration_s)
+                + compute_leading_windows(ident_breaks)
             )
-            for br in breaks or []:
-                shifted = offset_ad_break(br, window_lo, source="host_read")
-                clamped = clamp_ad_break(shifted, window_lo, window_hi)
-                if clamped is not None:
-                    host_reads.append(clamped)
+            for start_s, end_s in windows:
+                window_lo = int(start_s * 1000)
+                window_hi = int(end_s * 1000)
+                breaks = _scan_window(
+                    window_lo,
+                    window_hi,
+                    lambda transcription, sub: analyse_provider.analyse_host_reads(
+                        transcription, sub, custom_instructions=host_read_instructions
+                    ),
+                )
+                for br in breaks or []:
+                    shifted = offset_ad_break(br, window_lo, source="host_read")
+                    clamped = clamp_ad_break(shifted, window_lo, window_hi)
+                    if clamped is not None:
+                        host_reads.append(clamped)
 
-        transcription_report.completed_at = datetime.utcnow().isoformat()
-        analysis_report.completed_at = datetime.utcnow().isoformat()
+            transcription_report.completed_at = datetime.utcnow().isoformat()
+            analysis_report.completed_at = datetime.utcnow().isoformat()
     except Exception as e:
         transcription_report.error = str(e)
         with Session(engine) as session:
@@ -724,7 +769,19 @@ def task_scan_acast_ads(self, episode_id: str, report_id: str) -> None:
             session.commit()
         raise
 
-    merged = reported_idents + host_reads
+    if fallback_breaks is not None:
+        merged = fallback_breaks
+        summary = (
+            f"Acast AI fallback: {fallback_ai_count} break(s) from whole-episode pass; "
+            f"{len(merged)} total after merge with {len(ident_breaks)} ident break(s)"
+        )
+    else:
+        merged = reported_idents + host_reads
+        summary = (
+            f"Acast AI scan: reported ads in {sections_reported}/{len(ident_breaks)} "
+            f"section(s); {len(host_reads)} host-read(s) found across {len(windows)} window(s)"
+        )
+
     with Session(engine) as session:
         episode = session.get(PodcastEpisode, episode_id)
         episode.ad_breaks = merged
@@ -735,10 +792,7 @@ def task_scan_acast_ads(self, episode_id: str, report_id: str) -> None:
         report.transcription_report = transcription_report
         report.refinement_report = analysis_report
         report.refined_at = datetime.utcnow()
-        report.append_log(
-            f"Acast AI scan: reported ads in {sections_reported}/{len(ident_breaks)} "
-            f"section(s); {len(host_reads)} host-read(s) found across {len(windows)} window(s)"
-        )
+        report.append_log(summary)
         session.add(report)
         session.commit()
 

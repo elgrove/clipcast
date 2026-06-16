@@ -25,6 +25,14 @@ HOST_READ_WINDOW_S = 120
 LEADING_HOST_READ_WINDOW_S = 120
 MIN_HOST_READ_WINDOW_S = 20
 
+# Low-confidence fallback: ident detection only finds ad breaks bracketed by the
+# Acast jingle, so an episode whose ads are host-read or dynamically inserted
+# without the jingle yields too few breaks. Acast inserts roughly one ad break
+# per 15 minutes of audio (a pre-roll plus a mid-roll every ~15 min), so when
+# ident detection finds fewer breaks than that, a whole-episode AI pass runs to
+# recover the ones with no jingle to anchor on.
+BREAK_INTERVAL_S = 900.0  # 15 min — expected spacing of Acast ad breaks
+
 
 def acast_feed_url_heuristic(feed_url: str) -> bool:
     return urlparse(feed_url).hostname == "feeds.acast.com"
@@ -286,3 +294,60 @@ def clamp_ad_break(br: AdBreak, lo_ms: int, hi_ms: int) -> AdBreak | None:
         adverts=clamp_adverts(br.adverts, lo_ms, hi_ms) if br.adverts is not None else None,
         source=br.source,
     )
+
+
+def expected_acast_breaks(duration_s: float) -> int:
+    """Minimum number of ad breaks expected for an episode of this length: one
+    per 15 minutes (under 15m none, 15-30m one, 30-45m two, 45-60m three, and so
+    on). When ident detection finds fewer breaks than this, the episode is
+    treated as low-confidence and a whole-episode AI pass runs as a fallback."""
+    return int(duration_s // BREAK_INTERVAL_S)
+
+
+def _breaks_overlap(a: AdBreak, b: AdBreak) -> bool:
+    a0, a1 = parse_time_to_ms(a.start_time), parse_time_to_ms(a.end_time)
+    b0, b1 = parse_time_to_ms(b.start_time), parse_time_to_ms(b.end_time)
+    return max(a0, b0) < min(a1, b1)
+
+
+def merge_fallback_breaks(ident_breaks: list[AdBreak], ai_breaks: list[AdBreak]) -> list[AdBreak]:
+    """Combine jingle-detected ident breaks with the breaks a whole-episode AI
+    fallback pass found. Ident breaks keep their precise jingle boundaries and
+    are enriched with advert itemisation from an overlapping AI break when they
+    carry none. AI breaks that overlap no ident break are added as new cuts —
+    these are the breaks the jingle detector missed (e.g. a host-read pre-roll).
+    The result is sorted by start time."""
+    result: list[AdBreak] = []
+    for ident in ident_breaks:
+        adverts = ident.adverts
+        if adverts is None:
+            for ai in ai_breaks:
+                if ai.adverts and _breaks_overlap(ident, ai):
+                    clamped = clamp_adverts(
+                        ai.adverts,
+                        parse_time_to_ms(ident.start_time),
+                        parse_time_to_ms(ident.end_time),
+                    )
+                    if clamped:
+                        adverts = clamped
+                        break
+        result.append(
+            AdBreak(
+                start_time=ident.start_time,
+                end_time=ident.end_time,
+                adverts=adverts,
+                source=ident.source,
+            )
+        )
+    for ai in ai_breaks:
+        if not any(_breaks_overlap(ai, ident) for ident in ident_breaks):
+            result.append(
+                AdBreak(
+                    start_time=ai.start_time,
+                    end_time=ai.end_time,
+                    adverts=ai.adverts,
+                    source=ai.source or "ai_fallback",
+                )
+            )
+    result.sort(key=lambda b: parse_time_to_ms(b.start_time))
+    return result
