@@ -112,15 +112,20 @@ class _StubProvider:
         *,
         host_reads: list[AdBreak] | None = None,
         section_breaks: list[AdBreak] | None = None,
+        fallback_breaks: list[AdBreak] | None = None,
         empty_transcript: bool = False,
     ):
         self.host_reads = host_reads or []
         self.section_breaks = section_breaks or []
+        self.fallback_breaks = fallback_breaks or []
         self.empty_transcript = empty_transcript
+        self.model_config = None  # real providers carry one; analyse_transcription reads it
         self.transcribe_calls = 0
         self.host_read_calls = 0
         self.section_calls = 0
+        self.analyse_calls = 0
         self.host_read_instructions: list[str | None] = []
+        self.analyse_instructions: list[str | None] = []
 
     def transcribe(self, audio_path, report=None):
         self.transcribe_calls += 1
@@ -150,6 +155,17 @@ class _StubProvider:
             report.output_tokens = (report.output_tokens or 0) + 15
             report.cost_usd = (report.cost_usd or 0.0) + 0.0015
         return list(self.section_breaks)
+
+    def analyse_ad_breaks(
+        self, transcription, report=None, custom_instructions=None, chunk_range=None
+    ):
+        self.analyse_calls += 1
+        self.analyse_instructions.append(custom_instructions)
+        if report is not None:
+            report.input_tokens = (report.input_tokens or 0) + 300
+            report.output_tokens = (report.output_tokens or 0) + 40
+            report.cost_usd = (report.cost_usd or 0.0) + 0.004
+        return list(self.fallback_breaks)
 
 
 def _patch_provider(monkeypatch, stub: _StubProvider):
@@ -534,3 +550,67 @@ def test_scan_passes_podcast_custom_prompt_to_host_read_scan(session, monkeypatc
 
     # Both scan windows (leading + trailing) received the per-podcast prompt.
     assert stub.host_read_instructions == [instruction, instruction]
+
+
+def test_fallback_triggers_when_too_few_idents(session, monkeypatch):
+    """A 31-min episode with a single ident break (expects 2) is low-confidence:
+    a whole-episode AI pass runs and its breaks merge with the ident break. The
+    windowed section/host-read scan is skipped entirely."""
+    from app.tasks import task_scan_acast_ads
+
+    _align_task_engine(monkeypatch)
+    _configure_models(session, enabled=True)
+
+    episode = _make_acast_episode(session, duration_ms=1_860_000, breaks=[(1_700_000, 1_760_000)])
+    report = _make_report(session, episode)
+
+    preroll = AdBreak(
+        start_time=format_ms_to_time(30_000),
+        end_time=format_ms_to_time(150_000),
+        adverts=[_advert(30_000, 150_000, "TrustFord")],
+        source="ai_fallback",
+    )
+    stub = _StubProvider(fallback_breaks=[preroll])
+    _patch_provider(monkeypatch, stub)
+
+    task_scan_acast_ads.apply(args=[episode.id, report.id]).get()
+    session.refresh(episode)
+    session.refresh(report)
+
+    # Whole-episode transcribe + analyse once; the windowed scan does not run.
+    assert stub.transcribe_calls == 1
+    assert stub.analyse_calls == 1
+    assert stub.host_read_calls == 0
+    assert stub.section_calls == 0
+
+    breaks = episode.ad_breaks
+    assert [b.source for b in breaks] == ["ai_fallback", "acast_ident"]
+    assert parse_time_to_ms(breaks[0].start_time) == 30_000
+    assert report.refined_at is not None
+    assert "low-confidence" in report.logs
+    assert "AI fallback" in report.logs
+
+
+def test_no_fallback_when_enough_idents(session, monkeypatch):
+    """A 31-min episode with two ident breaks (expects 2) stays on the windowed
+    scan path — no whole-episode analyse call."""
+    from app.tasks import task_scan_acast_ads
+
+    _align_task_engine(monkeypatch)
+    _configure_models(session, enabled=True)
+
+    episode = _make_acast_episode(
+        session,
+        duration_ms=1_860_000,
+        breaks=[(300_000, 360_000), (1_700_000, 1_760_000)],
+    )
+    report = _make_report(session, episode)
+
+    stub = _StubProvider()
+    _patch_provider(monkeypatch, stub)
+
+    task_scan_acast_ads.apply(args=[episode.id, report.id]).get()
+    session.refresh(report)
+
+    assert stub.analyse_calls == 0
+    assert "low-confidence" not in report.logs

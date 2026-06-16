@@ -17,7 +17,9 @@ from app.services.acast import (
     compute_leading_windows,
     compute_trailing_windows,
     detect_idents,
+    expected_acast_breaks,
     idents_to_ad_breaks,
+    merge_fallback_breaks,
     merge_scan_windows,
     offset_ad_break,
     offset_adverts,
@@ -448,3 +450,82 @@ def test_clamp_ad_break_trims_boundaries_and_adverts():
 def test_clamp_ad_break_drops_break_entirely_outside():
     br = _break_s(200, 260, source="host_read")
     assert clamp_ad_break(br, lo_ms=0, hi_ms=120_000) is None
+
+
+# ── Low-confidence fallback ──────────────────────────────────────────────────
+
+
+def test_expected_acast_breaks_bands():
+    assert expected_acast_breaks(0) == 0
+    assert expected_acast_breaks(14 * 60) == 0
+    assert expected_acast_breaks(15 * 60) == 1
+    assert expected_acast_breaks(29 * 60) == 1
+    assert expected_acast_breaks(30 * 60) == 2
+    assert expected_acast_breaks(44 * 60) == 2
+    assert expected_acast_breaks(45 * 60) == 3
+    assert expected_acast_breaks(50 * 60) == 3  # today's episode: expects 3
+    assert expected_acast_breaks(60 * 60) == 4  # no cap — scales for long shows
+
+
+def test_expected_acast_breaks_over_30_min_is_at_least_two():
+    for minutes in range(31, 120):
+        assert expected_acast_breaks(minutes * 60) >= 2
+
+
+def _ai_break(start_s, end_s, advert_name="Brand"):
+    return AdBreak(
+        start_time=format_ms_to_time(int(start_s * 1000)),
+        end_time=format_ms_to_time(int(end_s * 1000)),
+        adverts=[
+            Advert(
+                start_time=format_ms_to_time(int(start_s * 1000)),
+                end_time=format_ms_to_time(int(end_s * 1000)),
+                advert_for=advert_name,
+            )
+        ],
+        source="ai_fallback",
+    )
+
+
+def test_merge_fallback_adds_non_overlapping_ai_break():
+    """A host-read break the jingle detector missed (no overlap) is kept."""
+    ident = _break_s(2880, 3010)  # 48:00-50:10, the one detected jingle break
+    ai_preroll = _ai_break(30, 150)  # pre-roll with no jingle nearby
+    merged = merge_fallback_breaks([ident], [ai_preroll, _ai_break(2890, 3000)])
+    # pre-roll added; the AI break overlapping the ident is dropped as a dupe.
+    sources = [b.source for b in merged]
+    assert sources == ["ai_fallback", "acast_ident"]
+    assert parse_time_to_ms(merged[0].start_time) == 30_000
+
+
+def test_merge_fallback_enriches_ident_adverts_from_overlap():
+    """An ident break with no itemised adverts adopts them from an overlapping
+    AI break, clamped to the ident's precise boundaries."""
+    ident = _break_s(2880, 3010)
+    overlapping = _ai_break(2890, 3050, advert_name="Salesforce")
+    merged = merge_fallback_breaks([ident], [overlapping])
+    assert len(merged) == 1
+    enriched = merged[0]
+    assert enriched.source == "acast_ident"
+    assert enriched.adverts is not None
+    assert enriched.adverts[0].advert_for == "Salesforce"
+    # advert end clamped to the ident's end (3010), not the AI's 3050.
+    assert parse_time_to_ms(enriched.adverts[0].end_time) == 3_010_000
+
+
+def test_merge_fallback_preserves_existing_ident_adverts():
+    ident = AdBreak(
+        start_time=format_ms_to_time(2_880_000),
+        end_time=format_ms_to_time(3_010_000),
+        adverts=[Advert(start_time="00:48:00.000", end_time="00:49:00.000", advert_for="Original")],
+        source="acast_ident",
+    )
+    merged = merge_fallback_breaks([ident], [_ai_break(2890, 3000, advert_name="Other")])
+    assert merged[0].adverts[0].advert_for == "Original"
+
+
+def test_merge_fallback_empty_ai_returns_idents():
+    ident = _break_s(2880, 3010)
+    merged = merge_fallback_breaks([ident], [])
+    assert len(merged) == 1
+    assert merged[0].source == "acast_ident"
