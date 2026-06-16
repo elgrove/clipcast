@@ -13,6 +13,10 @@ services:
       - DATABASE_PATH=/data/clipcast.db
       - PODCASTS_DIR=/podcasts
       - FRONTEND_DIR=static/frontend
+      # Optional: enables the in-app "Submit a ticket" footer link (files issues to Linear)
+      - LINEAR_API_KEY=${LINEAR_API_KEY:-}
+      - LINEAR_TEAM_ID=${LINEAR_TEAM_ID:-}
+      - LINEAR_PROJECT_ID=${LINEAR_PROJECT_ID:-}
     restart: unless-stopped
 
   transcription:

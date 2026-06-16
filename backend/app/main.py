@@ -9,7 +9,16 @@ from fastapi.staticfiles import StaticFiles
 
 from app.config import settings
 from app.database import init_db
-from app.routers import config, episodes, feed, podcasts, providers, reports, search
+from app.routers import (
+    bug_reports,
+    config,
+    episodes,
+    feed,
+    podcasts,
+    providers,
+    reports,
+    search,
+)
 
 logging.basicConfig(
     level=logging.DEBUG if settings.debug else logging.INFO,
@@ -49,6 +58,7 @@ app.include_router(providers.router)
 app.include_router(search.router)
 app.include_router(feed.router)
 app.include_router(reports.router)
+app.include_router(bug_reports.router)
 
 # Serve SPA frontend if the build directory exists
 frontend_dir = Path(settings.frontend_dir)

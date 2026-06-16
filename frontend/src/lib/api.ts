@@ -11,7 +11,9 @@ import type {
 	TestResult,
 	ClippingReport,
 	ClippingReportDetail,
-	ITunesSearchResult
+	ITunesSearchResult,
+	BugReportInput,
+	BugReportResult
 } from './types';
 
 const BASE_URL = '';
@@ -251,4 +253,16 @@ export async function getReports(limit = 50): Promise<ClippingReportDetail[]> {
 export function exportOpml(feedType: string): void {
 	const params = new URLSearchParams({ feed_type: feedType });
 	window.location.href = `${BASE_URL}/api/config/export-opml?${params}`;
+}
+
+export async function getBugReportsEnabled(): Promise<boolean> {
+	const res = await fetchApi<{ enabled: boolean }>('/api/bug-reports/enabled');
+	return res.enabled;
+}
+
+export async function submitBugReport(input: BugReportInput): Promise<BugReportResult> {
+	return fetchApi<BugReportResult>('/api/bug-reports', {
+		method: 'POST',
+		body: JSON.stringify(input)
+	});
 }

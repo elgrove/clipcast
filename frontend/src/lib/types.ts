@@ -173,3 +173,14 @@ export interface ITunesSearchResult {
 	episode_count: number | null;
 	ads_by_acast: boolean;
 }
+
+export interface BugReportInput {
+	title: string;
+	description: string;
+	page_url: string | null;
+}
+
+export interface BugReportResult {
+	identifier: string;
+	url: string;
+}

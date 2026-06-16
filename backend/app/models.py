@@ -5,6 +5,7 @@ from enum import StrEnum
 from pathlib import Path
 
 from pydantic import BaseModel as PydanticBaseModel
+from pydantic import Field as PydanticField
 from sqlalchemy import UniqueConstraint
 from sqlmodel import Column, Field, Relationship, SQLModel, Text
 
@@ -664,3 +665,14 @@ class ITunesSearchResult(PydanticBaseModel):
     genre: str
     episode_count: int | None = None
     ads_by_acast: bool = False
+
+
+class BugReportCreate(PydanticBaseModel):
+    title: str = PydanticField(min_length=1, max_length=255)
+    description: str = PydanticField(default="", max_length=10000)
+    page_url: str | None = PydanticField(default=None, max_length=2000)
+
+
+class BugReportResult(PydanticBaseModel):
+    identifier: str
+    url: str

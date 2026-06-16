@@ -12,6 +12,9 @@ class Settings(BaseSettings):
     celery_workers: int = 2
     frontend_dir: str = "static/frontend"
     external_url: str = ""
+    linear_api_key: str = ""
+    linear_team_id: str = ""
+    linear_project_id: str = ""
 
     @property
     def database_url(self) -> str:

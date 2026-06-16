@@ -1,12 +1,25 @@
 <script lang="ts">
 	import '../app.css';
+	import { onMount } from 'svelte';
 	import { toasts } from '$lib/stores';
+	import { getBugReportsEnabled } from '$lib/api';
+	import BugReportModal from '$lib/components/BugReportModal.svelte';
 	import type { Snippet } from 'svelte';
 
 	let { children }: { children: Snippet } = $props();
 
 	let mobileMenuOpen = $state(false);
 	let adminDropdownOpen = $state(false);
+	let bugReportsEnabled = $state(false);
+	let bugModalOpen = $state(false);
+
+	onMount(async () => {
+		try {
+			bugReportsEnabled = await getBugReportsEnabled();
+		} catch {
+			bugReportsEnabled = false;
+		}
+	});
 
 	let toastList: { id: number; type: string; message: string }[] = $state([]);
 	toasts.subscribe((v) => (toastList = v));
@@ -131,6 +144,21 @@
 	<main class="mx-auto max-w-7xl px-4 py-5 sm:px-6 sm:py-6">
 		{@render children()}
 	</main>
+
+	{#if bugReportsEnabled}
+		<footer class="mx-auto max-w-7xl px-4 pb-6 pt-2 sm:px-6">
+			<div class="flex justify-center border-t border-zinc-200 pt-4 dark:border-zinc-800">
+				<button
+					onclick={() => (bugModalOpen = true)}
+					class="text-xs text-zinc-400 transition-colors hover:text-zinc-600 dark:text-zinc-600 dark:hover:text-zinc-400"
+				>
+					Submit a ticket
+				</button>
+			</div>
+		</footer>
+
+		<BugReportModal bind:open={bugModalOpen} />
+	{/if}
 
 	<div class="fixed bottom-4 right-4 z-50 flex flex-col gap-2">
 		{#each toastList as toast (toast.id)}
