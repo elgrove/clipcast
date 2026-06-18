@@ -25,6 +25,15 @@ HOST_READ_WINDOW_S = 120
 LEADING_HOST_READ_WINDOW_S = 120
 MIN_HOST_READ_WINDOW_S = 20
 
+# Opening pass: the start of an episode stacks the densest, most error-prone ads
+# — a pre-roll of programmatic spots and host-reads, often with no clean jingle to
+# anchor on. Rather than rely on jingle-anchored windows there, always run one
+# general ad-detection pass over the opening, anchored at 0:00 so nothing before
+# the first jingle is missed. The pass covers at least OPENING_SCAN_S, extending
+# to OPENING_SCAN_BUFFER_S past the first detected break if that runs longer.
+OPENING_SCAN_S = 300  # 5 min
+OPENING_SCAN_BUFFER_S = 30
+
 # Low-confidence fallback: ident detection only finds ad breaks bracketed by the
 # Acast jingle, so an episode whose ads are host-read or dynamically inserted
 # without the jingle yields too few breaks. Acast inserts roughly one ad break
@@ -351,3 +360,48 @@ def merge_fallback_breaks(ident_breaks: list[AdBreak], ai_breaks: list[AdBreak])
             )
     result.sort(key=lambda b: parse_time_to_ms(b.start_time))
     return result
+
+
+def opening_scan_end_s(ident_breaks: list[AdBreak], audio_duration_s: float) -> float:
+    """End (seconds) of the opening region to scan for ads, always starting at 0:00.
+    At least ``OPENING_SCAN_S``; if the first break opens inside that region (a
+    pre-roll pod) it extends to ``OPENING_SCAN_BUFFER_S`` past that break's end so
+    the whole pod is covered. A first break that opens later is a mid-roll and does
+    not extend the region. Clamped to the audio duration."""
+    end = float(OPENING_SCAN_S)
+    if ident_breaks:
+        first = min(ident_breaks, key=lambda b: parse_time_to_ms(b.start_time))
+        if parse_time_to_ms(first.start_time) / 1000.0 < OPENING_SCAN_S:
+            end = max(end, parse_time_to_ms(first.end_time) / 1000.0 + OPENING_SCAN_BUFFER_S)
+    return min(end, audio_duration_s)
+
+
+def union_breaks(breaks: list[AdBreak]) -> list[AdBreak]:
+    """Merge overlapping ad breaks into contiguous cuts, taking the union of their
+    spans and concatenating their adverts. Where breaks from different sources
+    overlap, ``acast_ident`` wins as the source label (it marks a jingle-precise
+    boundary). Used to fuse the opening-pass breaks with the ident break(s) they
+    overlap so a pre-roll stack becomes one clean cut rather than several
+    double-counted ones. Breaks that merely abut (one ending exactly where the
+    next begins) are left as separate cuts."""
+    if not breaks:
+        return []
+    ordered = sorted(breaks, key=lambda b: parse_time_to_ms(b.start_time))
+    merged: list[AdBreak] = [ordered[0]]
+    for br in ordered[1:]:
+        prev = merged[-1]
+        prev_end = parse_time_to_ms(prev.end_time)
+        cur_start = parse_time_to_ms(br.start_time)
+        cur_end = parse_time_to_ms(br.end_time)
+        if cur_start < prev_end:
+            combined = (prev.adverts or []) + (br.adverts or [])
+            source = "acast_ident" if "acast_ident" in (prev.source, br.source) else prev.source
+            merged[-1] = AdBreak(
+                start_time=prev.start_time,
+                end_time=format_ms_to_time(max(prev_end, cur_end)),
+                adverts=combined or None,
+                source=source,
+            )
+        else:
+            merged.append(br)
+    return merged

@@ -107,6 +107,23 @@ def test_update_podcast_clip_mode(client, session):
 
 
 @responses.activate
+def test_update_podcast_keep_raw_episodes(client, session):
+    responses.add(responses.GET, "https://itunes.apple.com/lookup", json=_itunes_result(151))
+    create_resp = client.post("/api/podcasts", json={"itunes_id": "151", "clip_mode": "acast"})
+    podcast_id = create_resp.json()["id"]
+
+    # Defaults off.
+    assert create_resp.json()["keep_raw_episodes"] is False
+
+    response = client.patch(f"/api/podcasts/{podcast_id}", json={"keep_raw_episodes": True})
+    assert response.status_code == 200
+    assert response.json()["keep_raw_episodes"] is True
+
+    # Round-trips on a fresh read.
+    assert client.get(f"/api/podcasts/{podcast_id}").json()["keep_raw_episodes"] is True
+
+
+@responses.activate
 def test_delete_podcast(client, session):
     responses.add(responses.GET, "https://itunes.apple.com/lookup", json=_itunes_result(222))
     create_resp = client.post("/api/podcasts", json={"itunes_id": "222"})
@@ -117,5 +134,3 @@ def test_delete_podcast(client, session):
 
     response = client.get("/api/podcasts")
     assert response.json() == []
-
-

@@ -215,9 +215,10 @@ class _StubProvider:
     def transcribe(self, audio_path, report=None):  # pragma: no cover - unused
         raise NotImplementedError
 
-    def analyse_ad_breaks(
+    def analyse_ads(
         self,
         transcription: Transcription,
+        context: str,
         report: AnalysisReport | None = None,
         custom_instructions: str | None = None,
         chunk_range: tuple[float, float] | None = None,
@@ -276,8 +277,8 @@ def test_analyse_transcription_filters_break_outside_primary_range():
     model = _model(context_window=131_072)
 
     class _OutOfRangeProvider(_StubProvider):
-        def analyse_ad_breaks(
-            self, transcription, report=None, custom_instructions=None, chunk_range=None
+        def analyse_ads(
+            self, transcription, context, report=None, custom_instructions=None, chunk_range=None
         ):
             self.calls.append((chunk_range[0], chunk_range[1], len(transcription.segments)))
             if report is not None:

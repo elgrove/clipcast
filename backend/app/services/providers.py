@@ -25,9 +25,7 @@ from app.models import (
     TranscriptionSegment,
 )
 from app.services.prompts import (
-    ANALYSE_ACAST_SECTION_PROMPT,
-    ANALYSE_AD_BREAKS_PROMPT,
-    ANALYSE_HOST_READ_PROMPT,
+    ANALYSE_ADS_PROMPT,
     REFINE_AD_END_PROMPT,
     REFINE_AD_START_PROMPT,
     TRANSCRIBE_AUDIO_PROMPT,
@@ -98,37 +96,22 @@ class AIProviderBase(ABC):
         pass
 
     @abstractmethod
-    def analyse_ad_breaks(
+    def analyse_ads(
         self,
         transcription: Transcription,
+        context: str,
         report: AnalysisReport = None,
         custom_instructions: str | None = None,
         chunk_range: tuple[float, float] | None = None,
     ) -> list[AdBreak]:
-        pass
-
-    @abstractmethod
-    def analyse_host_reads(
-        self,
-        transcription: Transcription,
-        report: AnalysisReport = None,
-        custom_instructions: str | None = None,
-    ) -> list[AdBreak]:
-        """Find host-read third-party adverts in a short window of content
-        adjacent to an ad break (before or after it). ``custom_instructions``
-        carries per-podcast guidance (e.g. segments to never treat as ads).
-        Timestamps are window-relative; the caller offsets them back to absolute
-        episode time."""
-
-    @abstractmethod
-    def analyse_acast_section(
-        self,
-        transcription: Transcription,
-        report: AnalysisReport = None,
-    ) -> list[AdBreak]:
-        """Itemise the adverts within a window already known to be an ad break
-        (bracketed by Acast idents), for reporting. Timestamps are window-relative;
-        the caller offsets them back to absolute episode time."""
+        """Identify advertisements in a block of transcript. ``context`` is one of
+        the ``ADS_CONTEXT_*`` strings (full episode, opening minutes, post-break
+        window, confirmed break) describing what the block is, so the model can
+        calibrate to its advertising base rate. ``custom_instructions`` carries
+        per-podcast guidance (e.g. segments to never treat as ads); ``chunk_range``
+        notes that the block is one window of a longer episode. Timestamps are
+        returned as given in the transcript — for a sub-window the caller offsets
+        them back to absolute episode time."""
 
     def calculate_cost(self, input_tokens, output_tokens, model_config: AIModel):
         input_cost = (
@@ -197,40 +180,20 @@ class GeminiProvider(AIProviderBase):
         ]
         return Transcription(segments=segments)
 
-    def analyse_ad_breaks(
+    def analyse_ads(
         self,
         transcription: Transcription,
+        context: str,
         report: AnalysisReport = None,
         custom_instructions: str | None = None,
         chunk_range: tuple[float, float] | None = None,
     ) -> list[AdBreak]:
         transcript_json = json.dumps(transcription.model_dump(), indent=2)
-        prompt = ANALYSE_AD_BREAKS_PROMPT.format(transcript=transcript_json)
+        prompt = ANALYSE_ADS_PROMPT.format(context=context, transcript=transcript_json)
         if chunk_range is not None:
             prompt += _format_chunk_range(chunk_range)
         if custom_instructions:
             prompt += f"\n\nAdditional instructions:\n{custom_instructions}"
-        return self._run_analysis(prompt, report)
-
-    def analyse_host_reads(
-        self,
-        transcription: Transcription,
-        report: AnalysisReport = None,
-        custom_instructions: str | None = None,
-    ) -> list[AdBreak]:
-        transcript_json = json.dumps(transcription.model_dump(), indent=2)
-        prompt = ANALYSE_HOST_READ_PROMPT.format(transcript=transcript_json)
-        if custom_instructions:
-            prompt += f"\n\nAdditional instructions:\n{custom_instructions}"
-        return self._run_analysis(prompt, report)
-
-    def analyse_acast_section(
-        self,
-        transcription: Transcription,
-        report: AnalysisReport = None,
-    ) -> list[AdBreak]:
-        transcript_json = json.dumps(transcription.model_dump(), indent=2)
-        prompt = ANALYSE_ACAST_SECTION_PROMPT.format(transcript=transcript_json)
         return self._run_analysis(prompt, report)
 
     def _run_analysis(self, prompt: str, report: AnalysisReport | None) -> list[AdBreak]:
@@ -390,27 +353,13 @@ class WhisperProvider(AIProviderBase):
         ]
         return Transcription(segments=segments)
 
-    def analyse_ad_breaks(
+    def analyse_ads(
         self,
         transcription: Transcription,
+        context: str,
         report: AnalysisReport = None,
         custom_instructions: str | None = None,
         chunk_range: tuple[float, float] | None = None,
-    ) -> list[AdBreak]:
-        raise NotImplementedError("WhisperProvider only supports transcription, not analysis")
-
-    def analyse_host_reads(
-        self,
-        transcription: Transcription,
-        report: AnalysisReport = None,
-        custom_instructions: str | None = None,
-    ) -> list[AdBreak]:
-        raise NotImplementedError("WhisperProvider only supports transcription, not analysis")
-
-    def analyse_acast_section(
-        self,
-        transcription: Transcription,
-        report: AnalysisReport = None,
     ) -> list[AdBreak]:
         raise NotImplementedError("WhisperProvider only supports transcription, not analysis")
 
@@ -460,40 +409,20 @@ class OpenAICompatibleProvider(AIProviderBase):
         ]
         return Transcription(segments=segments)
 
-    def analyse_ad_breaks(
+    def analyse_ads(
         self,
         transcription: Transcription,
+        context: str,
         report: AnalysisReport = None,
         custom_instructions: str | None = None,
         chunk_range: tuple[float, float] | None = None,
     ) -> list[AdBreak]:
         transcript_json = json.dumps(transcription.model_dump(), indent=2)
-        prompt = ANALYSE_AD_BREAKS_PROMPT.format(transcript=transcript_json)
+        prompt = ANALYSE_ADS_PROMPT.format(context=context, transcript=transcript_json)
         if chunk_range is not None:
             prompt += _format_chunk_range(chunk_range)
         if custom_instructions:
             prompt += f"\n\nAdditional instructions:\n{custom_instructions}"
-        return self._run_analysis(prompt, report)
-
-    def analyse_host_reads(
-        self,
-        transcription: Transcription,
-        report: AnalysisReport = None,
-        custom_instructions: str | None = None,
-    ) -> list[AdBreak]:
-        transcript_json = json.dumps(transcription.model_dump(), indent=2)
-        prompt = ANALYSE_HOST_READ_PROMPT.format(transcript=transcript_json)
-        if custom_instructions:
-            prompt += f"\n\nAdditional instructions:\n{custom_instructions}"
-        return self._run_analysis(prompt, report)
-
-    def analyse_acast_section(
-        self,
-        transcription: Transcription,
-        report: AnalysisReport = None,
-    ) -> list[AdBreak]:
-        transcript_json = json.dumps(transcription.model_dump(), indent=2)
-        prompt = ANALYSE_ACAST_SECTION_PROMPT.format(transcript=transcript_json)
         return self._run_analysis(prompt, report)
 
     def _run_analysis(self, prompt: str, report: AnalysisReport | None) -> list[AdBreak]:

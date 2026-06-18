@@ -194,6 +194,41 @@ def test_edit_episode_skips_raw_when_disabled(session):
     assert len(AudioSegment.from_mp3(episode.mp3_path)) == pytest.approx(8_000, abs=300)
 
 
+# ── cleanup raw retention ─────────────────────────────────────────────────────
+
+
+def _touch_episode_files(episode) -> None:
+    for p in (episode.mp3_path, episode.raw_path, episode.srt_path, episode.ad_breaks_path):
+        p.write_bytes(b"x")
+
+
+def test_delete_episode_files_preserves_raw_when_kept(session):
+    from app.tasks import _delete_episode_files
+
+    episode = _make_episode_with_cuts(session, "cleanup_keep_raw", [(2, 4)])
+    _touch_episode_files(episode)
+
+    deleted = _delete_episode_files(episode, keep_raw=True)
+
+    assert deleted == 3
+    assert episode.raw_path.exists()
+    assert not episode.mp3_path.exists()
+    assert not episode.srt_path.exists()
+    assert not episode.ad_breaks_path.exists()
+
+
+def test_delete_episode_files_removes_raw_by_default(session):
+    from app.tasks import _delete_episode_files
+
+    episode = _make_episode_with_cuts(session, "cleanup_drop_raw", [(2, 4)])
+    _touch_episode_files(episode)
+
+    deleted = _delete_episode_files(episode)
+
+    assert deleted == 4
+    assert not episode.raw_path.exists()
+
+
 # ── Pipeline chain routing ────────────────────────────────────────────────────
 
 

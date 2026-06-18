@@ -11,6 +11,7 @@ export interface PodcastShow {
 	image_url: string | null;
 	cleanup_keep_days: number | null;
 	cleanup_keep_count: number | null;
+	keep_raw_episodes: boolean;
 	custom_prompt: string;
 }
 

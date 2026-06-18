@@ -1,6 +1,7 @@
 """Tests for task_scan_acast_ads — the post-ident AI pass that reports the
-advertisers inside each Acast ad section and scans the following content for
-host-read adverts."""
+advertisers inside each Acast ad section, sweeps the opening of the episode for
+the pre-roll stack, and scans the content around later breaks for host-read
+adverts."""
 
 from pathlib import Path
 
@@ -104,26 +105,31 @@ def _configure_models(session, *, enabled: bool) -> None:
 
 
 class _StubProvider:
-    """Returns a fixed transcription, fixed (window-relative) host reads, and a
-    fixed (window-relative) section advert list."""
+    """Returns a fixed transcription and fixed (window-relative) breaks, dispatched
+    by the analysis ``context``: opening pass, post-break host-read window,
+    confirmed-section itemisation, or whole-episode fallback."""
 
     def __init__(
         self,
         *,
+        opening_breaks: list[AdBreak] | None = None,
         host_reads: list[AdBreak] | None = None,
         section_breaks: list[AdBreak] | None = None,
         fallback_breaks: list[AdBreak] | None = None,
         empty_transcript: bool = False,
     ):
+        self.opening_breaks = opening_breaks or []
         self.host_reads = host_reads or []
         self.section_breaks = section_breaks or []
         self.fallback_breaks = fallback_breaks or []
         self.empty_transcript = empty_transcript
         self.model_config = None  # real providers carry one; analyse_transcription reads it
         self.transcribe_calls = 0
+        self.opening_calls = 0
         self.host_read_calls = 0
         self.section_calls = 0
         self.analyse_calls = 0
+        self.opening_instructions: list[str | None] = []
         self.host_read_instructions: list[str | None] = []
         self.analyse_instructions: list[str | None] = []
 
@@ -139,33 +145,35 @@ class _StubProvider:
             segments=[TranscriptionSegment(start_time=0.0, end_time=100.0, text="hello")]
         )
 
-    def analyse_host_reads(self, transcription, report=None, custom_instructions=None):
-        self.host_read_calls += 1
-        self.host_read_instructions.append(custom_instructions)
-        if report is not None:
-            report.input_tokens = (report.input_tokens or 0) + 200
-            report.output_tokens = (report.output_tokens or 0) + 20
-            report.cost_usd = (report.cost_usd or 0.0) + 0.002
-        return list(self.host_reads)
-
-    def analyse_acast_section(self, transcription, report=None):
-        self.section_calls += 1
-        if report is not None:
-            report.input_tokens = (report.input_tokens or 0) + 100
-            report.output_tokens = (report.output_tokens or 0) + 15
-            report.cost_usd = (report.cost_usd or 0.0) + 0.0015
-        return list(self.section_breaks)
-
-    def analyse_ad_breaks(
-        self, transcription, report=None, custom_instructions=None, chunk_range=None
+    def analyse_ads(
+        self, transcription, context, report=None, custom_instructions=None, chunk_range=None
     ):
-        self.analyse_calls += 1
-        self.analyse_instructions.append(custom_instructions)
+        from app.services.prompts import (
+            ADS_CONTEXT_CONFIRMED_BREAK,
+            ADS_CONTEXT_OPENING,
+            ADS_CONTEXT_POST_BREAK_WINDOW,
+        )
+
+        if context == ADS_CONTEXT_CONFIRMED_BREAK:
+            self.section_calls += 1
+            result, bump = self.section_breaks, (100, 15, 0.0015)
+        elif context == ADS_CONTEXT_OPENING:
+            self.opening_calls += 1
+            self.opening_instructions.append(custom_instructions)
+            result, bump = self.opening_breaks, (200, 20, 0.002)
+        elif context == ADS_CONTEXT_POST_BREAK_WINDOW:
+            self.host_read_calls += 1
+            self.host_read_instructions.append(custom_instructions)
+            result, bump = self.host_reads, (200, 20, 0.002)
+        else:  # ADS_CONTEXT_FULL_EPISODE (low-confidence fallback)
+            self.analyse_calls += 1
+            self.analyse_instructions.append(custom_instructions)
+            result, bump = self.fallback_breaks, (300, 40, 0.004)
         if report is not None:
-            report.input_tokens = (report.input_tokens or 0) + 300
-            report.output_tokens = (report.output_tokens or 0) + 40
-            report.cost_usd = (report.cost_usd or 0.0) + 0.004
-        return list(self.fallback_breaks)
+            report.input_tokens = (report.input_tokens or 0) + bump[0]
+            report.output_tokens = (report.output_tokens or 0) + bump[1]
+            report.cost_usd = (report.cost_usd or 0.0) + bump[2]
+        return list(result)
 
 
 def _patch_provider(monkeypatch, stub: _StubProvider):
@@ -190,6 +198,12 @@ def _advert(start_ms: int, end_ms: int, name: str) -> Advert:
         end_time=format_ms_to_time(end_ms),
         advert_for=name,
     )
+
+
+# A mid-roll break sits well past the 5-minute opening region, so the section and
+# host-read window logic can be exercised without the opening pass overlapping it.
+_MIDROLL = (500_000, 530_000)
+_LONG_MS = 900_000
 
 
 # ── Tests ────────────────────────────────────────────────────────────────────
@@ -245,18 +259,17 @@ def test_scan_skipped_without_models(session, monkeypatch):
 
 
 def test_scan_reports_section_and_appends_host_read(session, monkeypatch):
-    """The ident section gets its advertisers itemised (absolute time) and a
-    window-relative host read is offset, tagged, and appended."""
+    """A mid-roll ident section gets its advertisers itemised (absolute time), the
+    opening pass runs once, and window-relative host reads are offset and appended."""
     from app.tasks import task_scan_acast_ads
 
     _align_task_engine(monkeypatch)
     _configure_models(session, enabled=True)
 
-    # Break 60s-90s; window starts at 90s. Section reports a Shopify advert 5s-25s
-    # into the section; host read is 10s-40s into the window.
-    episode = _make_acast_episode(session, duration_ms=200_000, breaks=[(60_000, 90_000)])
+    episode = _make_acast_episode(session, duration_ms=_LONG_MS, breaks=[_MIDROLL])
     report = _make_report(session, episode)
 
+    # Section advert 5s-25s into the 500s-530s break → absolute 505s-525s.
     section = AdBreak(
         start_time=format_ms_to_time(5_000),
         end_time=format_ms_to_time(25_000),
@@ -275,9 +288,9 @@ def test_scan_reports_section_and_appends_host_read(session, monkeypatch):
     session.refresh(episode)
     session.refresh(report)
 
-    # Section transcription + a leading window (before the break) + a trailing
-    # window (after it) → 3 transcriptions, 2 host-read analyses.
-    assert stub.transcribe_calls == 3
+    # Opening pass (1) + section (1) + leading window (1) + trailing window (1).
+    assert stub.transcribe_calls == 4
+    assert stub.opening_calls == 1
     assert stub.section_calls == 1
     assert stub.host_read_calls == 2
 
@@ -291,37 +304,39 @@ def test_scan_reports_section_and_appends_host_read(session, monkeypatch):
     assert len(hosts) == 2
     leading, trailing = hosts
 
-    # Section advert reported at absolute time (60s + 5s/25s → 65s/85s).
+    # Section advert reported at absolute time (500s + 5s/25s → 505s/525s).
     assert ident.adverts is not None
     assert ident.adverts[0].advert_for == "Shopify"
-    assert parse_time_to_ms(ident.adverts[0].start_time) == 65_000
-    assert parse_time_to_ms(ident.adverts[0].end_time) == 85_000
+    assert parse_time_to_ms(ident.adverts[0].start_time) == 505_000
+    assert parse_time_to_ms(ident.adverts[0].end_time) == 525_000
 
-    # Leading window is [0s, 60s] → the read 10s-40s in stays at 10s/40s.
-    assert parse_time_to_ms(leading.start_time) == 10_000
-    assert parse_time_to_ms(leading.end_time) == 40_000
-    # Trailing window starts at 90s → the read is offset to 100s/130s.
-    assert parse_time_to_ms(trailing.start_time) == 100_000
-    assert parse_time_to_ms(trailing.end_time) == 130_000
+    # Leading window [380s, 500s] → the read 10s-40s in stays at 390s/420s.
+    assert parse_time_to_ms(leading.start_time) == 390_000
+    assert parse_time_to_ms(leading.end_time) == 420_000
+    # Trailing window starts at 530s → the read is offset to 540s/570s.
+    assert parse_time_to_ms(trailing.start_time) == 540_000
+    assert parse_time_to_ms(trailing.end_time) == 570_000
     assert trailing.adverts is not None
-    assert parse_time_to_ms(trailing.adverts[0].start_time) == 100_000
+    assert parse_time_to_ms(trailing.adverts[0].start_time) == 540_000
 
     assert report.refined_at is not None
-    assert "reported ads in 1/1 section(s)" in report.logs
-    assert "2 host-read(s) found" in report.logs
+    assert "reported ads in 1 section(s)" in report.logs
+    assert "0 opening-pass break(s)" in report.logs
+    assert "2 host-read(s) across 2 window(s)" in report.logs
+    assert "3 cut(s) after merge" in report.logs
     assert report.refinement_report is not None
     assert report.refinement_report.cost_usd and report.refinement_report.cost_usd > 0
 
 
 def test_scan_reports_section_when_no_host_read(session, monkeypatch):
-    """Section itemised, but the trailing window has no host read → only the ident
+    """Section itemised, opening pass and windows find nothing → only the ident
     break remains, now carrying its advert detail."""
     from app.tasks import task_scan_acast_ads
 
     _align_task_engine(monkeypatch)
     _configure_models(session, enabled=True)
 
-    episode = _make_acast_episode(session, duration_ms=200_000, breaks=[(60_000, 90_000)])
+    episode = _make_acast_episode(session, duration_ms=_LONG_MS, breaks=[_MIDROLL])
     report = _make_report(session, episode)
 
     section = AdBreak(
@@ -339,30 +354,29 @@ def test_scan_reports_section_when_no_host_read(session, monkeypatch):
 
     assert [b.source for b in episode.ad_breaks] == ["acast_ident"]
     assert episode.ad_breaks[0].adverts[0].advert_for == "BetMGM"
-    assert "reported ads in 1/1 section(s)" in report.logs
-    assert "0 host-read(s) found" in report.logs
+    assert "reported ads in 1 section(s)" in report.logs
+    assert "0 host-read(s) across 2 window(s)" in report.logs
     assert report.refined_at is not None
 
 
-def test_scan_short_tail_still_reports_section(session, monkeypatch):
-    """The trailing window is too short to scan, but the ident section is still
-    transcribed and reported."""
+def test_opening_pass_detects_preroll_the_idents_missed(session, monkeypatch):
+    """The opening pass finds a pre-roll advert that has no jingle to anchor on and
+    appends it as a new cut tagged opening_scan, alongside the mid-roll ident."""
     from app.tasks import task_scan_acast_ads
 
     _align_task_engine(monkeypatch)
     _configure_models(session, enabled=True)
 
-    # 100s episode, pre-roll break 0s-90s → no leading window (break at the
-    # start) and only a 10s tail, below the minimum trailing window.
-    episode = _make_acast_episode(session, duration_ms=100_000, breaks=[(0, 90_000)])
+    episode = _make_acast_episode(session, duration_ms=_LONG_MS, breaks=[_MIDROLL])
     report = _make_report(session, episode)
 
-    section = AdBreak(
-        start_time=format_ms_to_time(0),
-        end_time=format_ms_to_time(30_000),
-        adverts=[_advert(0, 30_000, "NordVPN")],
+    # Pre-roll the jingle detector missed: 20s-80s, absolute (opening window is 0).
+    preroll = AdBreak(
+        start_time=format_ms_to_time(20_000),
+        end_time=format_ms_to_time(80_000),
+        adverts=[_advert(20_000, 80_000, "Cunard")],
     )
-    stub = _StubProvider(host_reads=[], section_breaks=[section])
+    stub = _StubProvider(opening_breaks=[preroll])
     _patch_provider(monkeypatch, stub)
 
     task_scan_acast_ads.apply(args=[episode.id, report.id]).get()
@@ -370,13 +384,77 @@ def test_scan_short_tail_still_reports_section(session, monkeypatch):
     session.refresh(episode)
     session.refresh(report)
 
-    # Section transcribed (1), no host-read window scanned.
-    assert stub.transcribe_calls == 1
-    assert stub.section_calls == 1
+    assert stub.opening_calls == 1
+    opening = next(b for b in episode.ad_breaks if b.source == "opening_scan")
+    assert parse_time_to_ms(opening.start_time) == 20_000
+    assert parse_time_to_ms(opening.end_time) == 80_000
+    assert opening.adverts[0].advert_for == "Cunard"
+    assert "1 opening-pass break(s)" in report.logs
+
+
+def test_opening_pass_fuses_with_overlapping_preroll_ident(session, monkeypatch):
+    """A pre-roll ident is inside the opening region: its section is NOT re-itemised
+    and its near windows are dropped; the opening-pass break overlapping it fuses
+    into one clean cut keeping the jingle-precise source label."""
+    from app.tasks import task_scan_acast_ads
+
+    _align_task_engine(monkeypatch)
+    _configure_models(session, enabled=True)
+
+    # Pre-roll ident break 0s-32s; episode 900s with no other break.
+    episode = _make_acast_episode(session, duration_ms=_LONG_MS, breaks=[(0, 32_000)])
+    report = _make_report(session, episode)
+
+    # The opening pass sees the whole pre-roll stack 0s-113s.
+    opening = AdBreak(
+        start_time=format_ms_to_time(0),
+        end_time=format_ms_to_time(113_000),
+        adverts=[_advert(0, 113_000, "Arnold Clark")],
+    )
+    stub = _StubProvider(opening_breaks=[opening])
+    _patch_provider(monkeypatch, stub)
+
+    task_scan_acast_ads.apply(args=[episode.id, report.id]).get()
+
+    session.refresh(episode)
+    session.refresh(report)
+
+    # Section itemisation skipped (break is inside the opening region) and the
+    # trailing window inside the opening region dropped → only the opening pass ran.
+    assert stub.section_calls == 0
     assert stub.host_read_calls == 0
-    assert [b.source for b in episode.ad_breaks] == ["acast_ident"]
-    assert episode.ad_breaks[0].adverts[0].advert_for == "NordVPN"
-    assert report.refined_at is not None
+    assert stub.opening_calls == 1
+    assert stub.transcribe_calls == 1
+
+    assert len(episode.ad_breaks) == 1
+    fused = episode.ad_breaks[0]
+    assert fused.source == "acast_ident"
+    assert parse_time_to_ms(fused.start_time) == 0
+    assert parse_time_to_ms(fused.end_time) == 113_000
+    assert fused.adverts[0].advert_for == "Arnold Clark"
+
+
+def test_opening_pass_receives_custom_instructions(session, monkeypatch):
+    """The per-podcast custom prompt reaches both the opening pass and the
+    host-read windows."""
+    from app.tasks import task_scan_acast_ads
+
+    _align_task_engine(monkeypatch)
+    _configure_models(session, enabled=True)
+
+    episode = _make_acast_episode(session, duration_ms=_LONG_MS, breaks=[_MIDROLL])
+    episode.podcast.custom_prompt = "Never clip the eBay segment."
+    session.add(episode.podcast)
+    session.commit()
+    report = _make_report(session, episode)
+
+    stub = _StubProvider()
+    _patch_provider(monkeypatch, stub)
+
+    task_scan_acast_ads.apply(args=[episode.id, report.id]).get()
+
+    assert stub.opening_instructions == ["Never clip the eBay segment."]
+    assert stub.host_read_instructions == ["Never clip the eBay segment."] * 2
 
 
 def test_scan_idempotent_on_second_run(session, monkeypatch):
@@ -387,7 +465,7 @@ def test_scan_idempotent_on_second_run(session, monkeypatch):
     _align_task_engine(monkeypatch)
     _configure_models(session, enabled=True)
 
-    episode = _make_acast_episode(session, duration_ms=200_000, breaks=[(60_000, 90_000)])
+    episode = _make_acast_episode(session, duration_ms=_LONG_MS, breaks=[_MIDROLL])
     report = _make_report(session, episode)
 
     host_read = AdBreak(
@@ -399,7 +477,7 @@ def test_scan_idempotent_on_second_run(session, monkeypatch):
 
     task_scan_acast_ads.apply(args=[episode.id, report.id]).get()
     first_transcribe = stub.transcribe_calls
-    assert first_transcribe == 3  # section + leading + trailing windows
+    assert first_transcribe == 4  # opening + section + leading + trailing
 
     task_scan_acast_ads.apply(args=[episode.id, report.id]).get()
 
@@ -416,8 +494,7 @@ def test_scan_clamps_overshooting_results_to_their_slice(session, monkeypatch):
     _align_task_engine(monkeypatch)
     _configure_models(session, enabled=True)
 
-    # Break 60s-90s (30s section); trailing window 90s-200s (episode is 200s).
-    episode = _make_acast_episode(session, duration_ms=200_000, breaks=[(60_000, 90_000)])
+    episode = _make_acast_episode(session, duration_ms=_LONG_MS, breaks=[_MIDROLL])
     report = _make_report(session, episode)
 
     # Section advert overshoots the 30s section (ends at 50s relative).
@@ -426,7 +503,7 @@ def test_scan_clamps_overshooting_results_to_their_slice(session, monkeypatch):
         end_time=format_ms_to_time(50_000),
         adverts=[_advert(5_000, 50_000, "Overshoot")],
     )
-    # Host read overshoots the 110s window (ends at 150s relative).
+    # Host read overshoots its window (ends at 150s relative).
     host_read = AdBreak(
         start_time=format_ms_to_time(10_000),
         end_time=format_ms_to_time(150_000),
@@ -445,32 +522,32 @@ def test_scan_clamps_overshooting_results_to_their_slice(session, monkeypatch):
     )
     leading, trailing = hosts
 
-    # Section advert clamped to the section end (90s).
-    assert parse_time_to_ms(ident.adverts[0].end_time) == 90_000
-    # Each host read (a real cut) is clamped to its own window's bounds: the
-    # leading window ends at the break start (60s), the trailing window at the
-    # episode end (200s).
-    assert parse_time_to_ms(leading.end_time) == 60_000
-    assert parse_time_to_ms(leading.adverts[0].end_time) == 60_000
-    assert parse_time_to_ms(trailing.start_time) == 100_000
-    assert parse_time_to_ms(trailing.end_time) == 200_000
-    assert parse_time_to_ms(trailing.adverts[0].end_time) == 200_000
+    # Section advert clamped to the section end (530s).
+    assert parse_time_to_ms(ident.adverts[0].end_time) == 530_000
+    # Each host read is clamped to its own window: the leading window ends at the
+    # break start (500s), the trailing window at break end + 120s (650s).
+    assert parse_time_to_ms(leading.end_time) == 500_000
+    assert parse_time_to_ms(leading.adverts[0].end_time) == 500_000
+    assert parse_time_to_ms(trailing.start_time) == 540_000
+    assert parse_time_to_ms(trailing.end_time) == 650_000
+    assert parse_time_to_ms(trailing.adverts[0].end_time) == 650_000
 
 
 def test_scan_skips_section_transcription_when_already_reported(session, monkeypatch):
-    """An ident break that already carries advert detail is not re-transcribed."""
+    """A mid-roll ident break that already carries advert detail is not
+    re-transcribed for itemisation."""
     from app.tasks import task_scan_acast_ads
 
     _align_task_engine(monkeypatch)
     _configure_models(session, enabled=True)
 
-    episode = _make_acast_episode(session, duration_ms=200_000, breaks=[(60_000, 90_000)])
+    episode = _make_acast_episode(session, duration_ms=_LONG_MS, breaks=[_MIDROLL])
     # Pre-populate the ident break with advert detail.
     breaks = episode.ad_breaks
     breaks[0] = AdBreak(
         start_time=breaks[0].start_time,
         end_time=breaks[0].end_time,
-        adverts=[_advert(60_000, 90_000, "Existing")],
+        adverts=[_advert(500_000, 530_000, "Existing")],
         source="acast_ident",
     )
     episode.ad_breaks = breaks
@@ -484,24 +561,21 @@ def test_scan_skips_section_transcription_when_already_reported(session, monkeyp
     task_scan_acast_ads.apply(args=[episode.id, report.id]).get()
 
     session.refresh(episode)
-    # No section transcription (already reported); only the scan windows.
+    # No section transcription (already reported); only opening + scan windows.
     assert stub.section_calls == 0
     ident = next(b for b in episode.ad_breaks if b.source == "acast_ident")
     assert ident.adverts[0].advert_for == "Existing"
 
 
 def test_scan_catches_host_read_leading_into_break(session, monkeypatch):
-    """Regression: a host read that airs just BEFORE an ident break (leading into
-    it) is scanned and cut. Previously only the window AFTER each break was
-    scanned, so a sponsor read leading into a jingle break survived the clip."""
+    """A host read that airs just BEFORE an ident break (leading into it) is scanned
+    and cut, as well as one trailing the break."""
     from app.tasks import task_scan_acast_ads
 
     _align_task_engine(monkeypatch)
     _configure_models(session, enabled=True)
 
-    # Mid-episode break 300s-330s in a 600s episode → a leading window (before
-    # 300s) and a trailing window (after 330s) are both scanned.
-    episode = _make_acast_episode(session, duration_ms=600_000, breaks=[(300_000, 330_000)])
+    episode = _make_acast_episode(session, duration_ms=_LONG_MS, breaks=[_MIDROLL])
     report = _make_report(session, episode)
 
     host_read = AdBreak(
@@ -519,98 +593,43 @@ def test_scan_catches_host_read_leading_into_break(session, monkeypatch):
         (b for b in episode.ad_breaks if b.source == "host_read"),
         key=lambda b: parse_time_to_ms(b.start_time),
     )
-    # Leading window [180s, 300s]: read 10s in → 190s-220s, before the break.
-    # Trailing window [330s, 450s]: read 10s in → 340s-370s.
-    assert [parse_time_to_ms(b.start_time) for b in hosts] == [190_000, 340_000]
+    # Leading window [380s, 500s]: read 10s in → 390s-420s, before the break.
+    # Trailing window [530s, 650s]: read 10s in → 540s-570s.
+    assert [parse_time_to_ms(b.start_time) for b in hosts] == [390_000, 540_000]
     # The lead-in read ends before the break starts — the case that used to slip.
-    assert parse_time_to_ms(hosts[0].end_time) == 220_000
-    assert parse_time_to_ms(hosts[0].end_time) <= 300_000
+    assert parse_time_to_ms(hosts[0].end_time) == 420_000
+    assert parse_time_to_ms(hosts[0].end_time) <= 500_000
 
 
-def test_scan_passes_podcast_custom_prompt_to_host_read_scan(session, monkeypatch):
-    """A podcast's custom_prompt is forwarded to the host-read analysis so
-    per-show guidance (e.g. 'never clip the eBay game segment') is applied during
-    the Acast scan — previously the scan ignored custom instructions entirely."""
+def test_scan_low_confidence_falls_back_to_whole_episode(session, monkeypatch):
+    """Too few ident breaks for the episode length → the whole-episode fallback
+    runs (full-episode context) and the opening pass does not."""
     from app.tasks import task_scan_acast_ads
 
     _align_task_engine(monkeypatch)
     _configure_models(session, enabled=True)
 
-    episode = _make_acast_episode(session, duration_ms=600_000, breaks=[(300_000, 330_000)])
-    instruction = "The eBay 'head-to-head second hand' game is content, not an advert."
-    episode.podcast.custom_prompt = instruction
-    session.add(episode.podcast)
-    session.commit()
+    # 900s episode expects one break; with zero idents detected it's low-confidence.
+    episode = _make_acast_episode(session, duration_ms=_LONG_MS, breaks=[])
     report = _make_report(session, episode)
 
-    stub = _StubProvider(host_reads=[])
-    _patch_provider(monkeypatch, stub)
-
-    task_scan_acast_ads.apply(args=[episode.id, report.id]).get()
-
-    # Both scan windows (leading + trailing) received the per-podcast prompt.
-    assert stub.host_read_instructions == [instruction, instruction]
-
-
-def test_fallback_triggers_when_too_few_idents(session, monkeypatch):
-    """A 31-min episode with a single ident break (expects 2) is low-confidence:
-    a whole-episode AI pass runs and its breaks merge with the ident break. The
-    windowed section/host-read scan is skipped entirely."""
-    from app.tasks import task_scan_acast_ads
-
-    _align_task_engine(monkeypatch)
-    _configure_models(session, enabled=True)
-
-    episode = _make_acast_episode(session, duration_ms=1_860_000, breaks=[(1_700_000, 1_760_000)])
-    report = _make_report(session, episode)
-
-    preroll = AdBreak(
+    fallback = AdBreak(
         start_time=format_ms_to_time(30_000),
         end_time=format_ms_to_time(150_000),
-        adverts=[_advert(30_000, 150_000, "TrustFord")],
+        adverts=[_advert(30_000, 150_000, "Shopify")],
         source="ai_fallback",
     )
-    stub = _StubProvider(fallback_breaks=[preroll])
+    stub = _StubProvider(fallback_breaks=[fallback])
     _patch_provider(monkeypatch, stub)
 
     task_scan_acast_ads.apply(args=[episode.id, report.id]).get()
+
     session.refresh(episode)
     session.refresh(report)
 
-    # Whole-episode transcribe + analyse once; the windowed scan does not run.
-    assert stub.transcribe_calls == 1
     assert stub.analyse_calls == 1
-    assert stub.host_read_calls == 0
+    assert stub.opening_calls == 0
     assert stub.section_calls == 0
-
-    breaks = episode.ad_breaks
-    assert [b.source for b in breaks] == ["ai_fallback", "acast_ident"]
-    assert parse_time_to_ms(breaks[0].start_time) == 30_000
-    assert report.refined_at is not None
-    assert "low-confidence" in report.logs
-    assert "AI fallback" in report.logs
-
-
-def test_no_fallback_when_enough_idents(session, monkeypatch):
-    """A 31-min episode with two ident breaks (expects 2) stays on the windowed
-    scan path — no whole-episode analyse call."""
-    from app.tasks import task_scan_acast_ads
-
-    _align_task_engine(monkeypatch)
-    _configure_models(session, enabled=True)
-
-    episode = _make_acast_episode(
-        session,
-        duration_ms=1_860_000,
-        breaks=[(300_000, 360_000), (1_700_000, 1_760_000)],
-    )
-    report = _make_report(session, episode)
-
-    stub = _StubProvider()
-    _patch_provider(monkeypatch, stub)
-
-    task_scan_acast_ads.apply(args=[episode.id, report.id]).get()
-    session.refresh(report)
-
-    assert stub.analyse_calls == 0
-    assert "low-confidence" not in report.logs
+    assert stub.host_read_calls == 0
+    assert [b.source for b in episode.ad_breaks] == ["ai_fallback"]
+    assert "whole-episode AI pass" in report.logs

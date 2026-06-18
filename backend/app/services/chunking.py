@@ -43,7 +43,7 @@ class Chunk:
 
 
 def _segments_to_prompt_json(segments: list[TranscriptionSegment]) -> str:
-    """Mirror what providers.analyse_ad_breaks pastes into the prompt."""
+    """Mirror what providers.analyse_ads pastes into the prompt."""
     payload = {"segments": [s.model_dump() for s in segments]}
     return json.dumps(payload, indent=2)
 

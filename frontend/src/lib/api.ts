@@ -76,6 +76,7 @@ export async function updatePodcast(
 		clip_mode?: string;
 		cleanup_keep_days?: number | null;
 		cleanup_keep_count?: number | null;
+		keep_raw_episodes?: boolean;
 		custom_prompt?: string;
 	}
 ): Promise<PodcastShow> {

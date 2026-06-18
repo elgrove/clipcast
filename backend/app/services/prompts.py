@@ -4,77 +4,70 @@ Example format: [{"start_time": 0.0, "end_time": 5.5, "text": "Hello world"}]
 Be precise with timestamps. Include all spoken content."""
 
 
-ANALYSE_AD_BREAKS_PROMPT = """You are an AI assistant specialised in analysing podcast transcripts to identify advertisement breaks.
+ANALYSE_ADS_PROMPT = """You are an expert at analysing podcast transcripts to find advertising.
 
-An "ad break" is one contiguous block of one or more back-to-back adverts. Most podcasts have between one and four breaks per episode (a pre-roll, one or two mid-rolls, sometimes a post-roll). Each break typically contains 1-4 individual adverts.
+{context}
 
-Guidelines for identifying ad breaks:
-- Analyse dialogue many lines at a time to understand the full context
-- Determine the start of a break from where the host pivots into sponsored content, and the end from where they pivot back to the show
-- Adverts can be pre-recorded (like radio ads) or host-read (common in podcasts)
-- A single advert typically spans 10 to 60 seconds; back-to-back adverts within one break form a single contiguous span
-- Very rarely will two adverts back-to-back inside the same break be for the same company/brand/product
-- Once a break ends, it's extremely rare for another break within the next 10 minutes
-- Look for sponsorship keywords: "sponsor," "brought to you by," "advertisement," "partner," "our friends at"
-- Watch for known brand/product/company names, but be careful not to confuse person names with companies
-- If any further instructions are appended to this prompt, they take precedence
+What counts as an advertisement (flag it):
+- A paid promotion for an external company, product, or service — whether pre-recorded (a radio-style spot or a programmatic/network-inserted ad) or host-read (voiced by the hosts in their own words, woven into the show).
+- Sponsorship cues: "sponsor", "brought to you by", "advertisement", "partner", "our friends at", a discount code, a vanity URL like brand.com/show, "go to X and use code Y".
+- Watch for brand/product/company names and calls to action to visit or buy from a third party — but don't confuse a person's name with a company, or a passing brand mention in conversation with a paid plug.
 
-Treat idents (short branding jingles) on either side of an ad break carefully — they fall into two distinct categories:
-- **Distributor / ad-break idents** (e.g. Acast's "This podcast is supported by...", or any network sting that announces or closes an ad break) are PART of the ad break. Extend the break span to include them: the start_time should be the start of the opening ident, and the end_time should be the end of the closing ident.
-- **Show idents** (the podcast's own intro/outro stings played at the same point each episode — the show's regular branding) are PART OF THE CONTENT. They must NOT be included in any break span. If a show ident sits between the host's last words and the first ad, the break starts AFTER the show ident, not before it.
-- When in doubt about an unfamiliar jingle, prefer keeping it as content (tighter break span).
+What does NOT count (never flag it):
+- The show's own promotion of itself: Patreon, memberships, merch, "subscribe/rate/review", "follow us on social", live-show tickets, or cross-promotion of other shows by the same hosts/network.
+- Ordinary conversation, banter, news, interviews, or editorial content.
+- A brand or product mentioned as part of the discussion that is not a paid plug.
 
-For each ad break you identify, return:
-- start_time and end_time of the whole break (the outer bounds covering every advert inside)
-- adverts: the list of individual adverts within the break. For each advert, give its own start_time, end_time, and advert_for (the company/product being advertised). This breakdown is required — identifying who is being advertised forces you to ground each break in real transcript content rather than guessing at boundaries.
+Idents (short branding jingles) near an ad break need care — they fall into two categories:
+- **Distributor / ad-break idents** (e.g. Acast's "This podcast is supported by...", or any network sting that announces or closes an ad break) are PART of the ad break. Extend the break to include them: start at the opening ident, end at the closing ident.
+- **Show idents** (the podcast's own intro/outro stings, its regular branding) are CONTENT. Never include them in a break. If a show ident sits between the host's last words and the first ad, the break starts AFTER it.
+- When unsure about an unfamiliar jingle, prefer keeping it as content (tighter break).
 
-Transcript:
-{transcript}"""
-
-
-ANALYSE_HOST_READ_PROMPT = """You are analysing a short transcript window taken from a podcast.
-
-This window is the regular show content that comes immediately AFTER a distributor ad break has finished. Hosts sometimes read a baked-in advert here — a paid third-party sponsorship voiced by the hosts in their own words, woven into the show. Your job is to find ONLY such host-read third-party adverts in this window.
-
-What counts as a host-read advert (flag it):
-- A paid promotion for an external company, product, or service ("this episode is supported by", "brought to you by", a discount code, a vanity URL like brand.com/show, "go to X and use code Y")
-- Look for sponsorship cues, brand names, offer codes, and calls to action to visit/buy from a third party
-
-What does NOT count (do NOT flag it):
-- The show's own promotion of itself: Patreon, memberships, merch, "subscribe/rate/review", "follow us on social", live-show tickets, or cross-promotion of other shows by the same hosts/network
-- Ordinary conversation, banter, news, interviews, or editorial content
-- A mention of a brand or product as part of the discussion that is not a paid plug
-
-If there is no host-read third-party advert in this window, return an empty list of breaks.
-
-Timestamps in the transcript are in seconds, relative to the START of this window. Return any advert you find using those same window-relative timestamps.
-
-For each host-read advert, return one break with:
-- start_time and end_time of the advert (where the host pivots into the plug, and where they pivot back to the show)
-- adverts: the individual advert(s) within it. For each, give its own start_time, end_time, and advert_for (the company/product). This breakdown is required — naming who is advertised forces you to ground the break in real transcript content rather than guessing.
+An "ad break" is one contiguous block of one or more back-to-back adverts; a single advert typically spans 10 to 60 seconds. For each break you identify, return:
+- start_time and end_time of the whole break (the outer bounds covering every advert inside).
+- adverts: the list of individual adverts within it. For each, give its own start_time, end_time, and advert_for (the company/product being advertised). This breakdown is required — naming who is advertised forces you to ground each break in real transcript content rather than guessing at boundaries.
+Very rarely will two back-to-back adverts in one break be for the same company/brand/product. Use timestamps consistent with the transcript segments you are given. If there is no advertising, return an empty list of breaks. If any further instructions are appended below, they take precedence.
 
 Transcript:
 {transcript}"""
 
 
-ANALYSE_ACAST_SECTION_PROMPT = """You are analysing a short transcript window that has ALREADY been identified as an advertising break in a podcast (it was bracketed by a podcast network's ad-break idents). The entire window is advertising — your job is to itemise WHICH advertisers appear in it, for reporting purposes.
+# Per-block priors fed into ANALYSE_ADS_PROMPT's {context} slot. They calibrate
+# the model to the base rate of advertising in the block it's shown, without
+# forking the shared definition of what an advert is.
 
-Identify each distinct advert in the window: programmatic/network spots, third-party sponsors, and any host-read or pre-recorded ads. Treat a change of advertiser, product, or offer as a new advert.
+ADS_CONTEXT_FULL_EPISODE = (
+    "This transcript is a full podcast episode, or a large contiguous portion of one. "
+    "Most episodes have between one and four breaks (a pre-roll, one or two mid-rolls, "
+    "sometimes a post-roll). Once a break ends it is extremely rare for another to begin "
+    "within the next 10 minutes — use this to avoid splitting one break into several or "
+    "inventing breaks in editorial content."
+)
 
-Do NOT include:
-- The network ident/jingle itself (the short branded sting that brackets the break) — that is not an advert
-- Silence or dead air
+ADS_CONTEXT_OPENING = (
+    "This transcript is only the OPENING few minutes of an episode — the most ad-dense "
+    "region. Episodes here typically begin with a pre-roll stack: one or more adverts "
+    "back-to-back, often mixing pre-recorded/programmatic spots with a host-read "
+    "sponsorship, before the show's editorial content begins. Do not assume the episode "
+    "opens with content — it usually opens with ads. Scan from the very start and flag "
+    "every advert up to the point the show proper begins."
+)
 
-If the window contains no recognisable advert content, return an empty list of breaks.
+ADS_CONTEXT_POST_BREAK_WINDOW = (
+    "This transcript is a short window of content immediately adjacent to a distributor "
+    "(Acast) ad break — either just after its closing jingle or just before the next "
+    "opening jingle. It is mostly ordinary show content, but a baked-in host-read sponsor "
+    "sometimes sits here, outside the jingle bracket. Flag only a genuine advert; be "
+    "conservative and do not mistake brand-heavy show talk for an ad."
+)
 
-Timestamps in the transcript are in seconds, relative to the START of this window. Return adverts using those same window-relative timestamps.
-
-Return one break spanning the advertising you find, with:
-- start_time and end_time of the break
-- adverts: one entry per distinct advert, each with its own start_time, end_time, and advert_for (the company/product/service being advertised). Name the advertiser as specifically as the transcript allows.
-
-Transcript:
-{transcript}"""
+ADS_CONTEXT_CONFIRMED_BREAK = (
+    "This entire transcript window has ALREADY been confirmed to be a single advertising "
+    "break — it was bracketed by distributor ad-break idents, so all of it is advertising. "
+    "Itemise every distinct advert within it (a change of advertiser, product, or offer "
+    "marks a new advert), and return a single break spanning the window. Do not flag the "
+    "network ident/jingle itself or silence."
+)
 
 
 REFINE_AD_START_PROMPT = """You are listening to a short audio clip from a podcast.

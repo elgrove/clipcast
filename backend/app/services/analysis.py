@@ -3,6 +3,7 @@ import logging
 from app.models import AdBreak, AnalysisReport, TranscriptionSegment
 from app.services.chunking import Chunk, chunk_segments, merge_ad_breaks, should_chunk
 from app.services.editor import parse_time_to_ms
+from app.services.prompts import ADS_CONTEXT_FULL_EPISODE
 from app.services.providers import AIProviderBase, Transcription
 
 logger = logging.getLogger(__name__)
@@ -36,8 +37,9 @@ def analyse_transcription(
 
     if not should_chunk(segments, context_window):
         logger.info("Analysing ad breaks (single call)")
-        breaks = provider.analyse_ad_breaks(
+        breaks = provider.analyse_ads(
             Transcription(segments=segments),
+            ADS_CONTEXT_FULL_EPISODE,
             report=report,
             custom_instructions=custom_instructions,
         )
@@ -63,8 +65,9 @@ def analyse_transcription(
             provider=report.provider,
             model_name=report.model_name,
         )
-        breaks = provider.analyse_ad_breaks(
+        breaks = provider.analyse_ads(
             Transcription(segments=chunk.segments),
+            ADS_CONTEXT_FULL_EPISODE,
             report=sub_report,
             custom_instructions=custom_instructions,
             chunk_range=(chunk.primary_start, chunk.primary_end),
