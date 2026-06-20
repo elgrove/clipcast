@@ -260,5 +260,5 @@ REGISTRY["openai"] = ProviderSpec(
 ```
 
 The factory must return any `AIProviderBase` that implements
-`analyse_ad_breaks`. After registering, models become referenceable as
+`analyse_ads`. After registering, models become referenceable as
 `openai:<model-name>` in run configs.

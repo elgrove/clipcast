@@ -43,6 +43,7 @@
 	let settingsClipMode = $state<'off' | 'ai' | 'acast'>('ai');
 	let cleanupKeepDays: string = $state('');
 	let cleanupKeepCount: string = $state('');
+	let keepRawEpisodes: boolean = $state(false);
 	let customPrompt: string = $state('');
 
 	let selectedIds: Set<string> = $state(new Set());
@@ -194,6 +195,7 @@
 		settingsClipMode = (podcast?.clip_mode ?? 'ai') as 'off' | 'ai' | 'acast';
 		cleanupKeepDays = podcast?.cleanup_keep_days?.toString() ?? '';
 		cleanupKeepCount = podcast?.cleanup_keep_count?.toString() ?? '';
+		keepRawEpisodes = podcast?.keep_raw_episodes ?? false;
 		customPrompt = podcast?.custom_prompt ?? '';
 	}
 
@@ -207,6 +209,7 @@
 				clip_mode: settingsClipMode,
 				cleanup_keep_days: days,
 				cleanup_keep_count: count,
+				keep_raw_episodes: keepRawEpisodes,
 				custom_prompt: customPrompt,
 			});
 			initSettingsFields();
@@ -1150,6 +1153,19 @@
 						class="mt-1 w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500/20 dark:border-zinc-700 dark:bg-zinc-900 dark:text-white"
 					/>
 				</div>
+				<label class="flex items-start gap-3">
+					<input
+						type="checkbox"
+						bind:checked={keepRawEpisodes}
+						class="mt-0.5 h-4 w-4 rounded border-zinc-300 text-emerald-600 focus:ring-emerald-500/20 dark:border-zinc-700 dark:bg-zinc-900"
+					/>
+					<span>
+						<span class="block text-sm text-zinc-700 dark:text-zinc-300">Keep original (raw) audio</span>
+						<span class="mt-0.5 block text-xs text-zinc-500 dark:text-zinc-400">
+							Retain the unedited download for each episode, kept even by auto-cleanup. Useful for debugging ad detection; uses more disk.
+						</span>
+					</span>
+				</label>
 			</div>
 			<div class="mt-6 flex gap-3 sm:justify-end">
 				<button

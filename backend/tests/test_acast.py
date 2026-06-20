@@ -10,6 +10,7 @@ from app.services.acast import (
     MAX_PAIR_GAP_S,
     MIN_HOST_READ_WINDOW_S,
     MIN_PAIR_GAP_S,
+    OPENING_SCAN_S,
     SAMPLE_RATE,
     acast_feed_url_heuristic,
     clamp_ad_break,
@@ -23,7 +24,9 @@ from app.services.acast import (
     merge_scan_windows,
     offset_ad_break,
     offset_adverts,
+    opening_scan_end_s,
     pair_idents,
+    union_breaks,
 )
 from app.services.editor import format_ms_to_time, parse_time_to_ms
 
@@ -529,3 +532,94 @@ def test_merge_fallback_empty_ai_returns_idents():
     merged = merge_fallback_breaks([ident], [])
     assert len(merged) == 1
     assert merged[0].source == "acast_ident"
+
+
+# ── opening_scan_end_s ───────────────────────────────────────────────────────
+
+
+def test_opening_scan_end_defaults_to_window():
+    """No ident breaks → just the default window, clamped to the audio."""
+    assert opening_scan_end_s([], 3600) == OPENING_SCAN_S
+    assert opening_scan_end_s([], 120) == 120  # clamped to a short episode
+
+
+def test_opening_scan_end_extends_for_long_preroll():
+    """A pre-roll opening at 0 that runs past the window extends to its end + buffer."""
+    preroll = _break_s(0, OPENING_SCAN_S + 40)
+    assert opening_scan_end_s([preroll], 3600) == OPENING_SCAN_S + 40 + 30
+
+
+def test_opening_scan_end_ignores_midroll():
+    """A first break that opens past the window is a mid-roll and never extends it."""
+    midroll = _break_s(1800, 1950)
+    assert opening_scan_end_s([midroll], 3600) == OPENING_SCAN_S
+
+
+def test_opening_scan_end_short_preroll_keeps_window():
+    """A short pre-roll leaves the default window in place (max, not min)."""
+    preroll = _break_s(0, 32)
+    assert opening_scan_end_s([preroll], 3600) == OPENING_SCAN_S
+
+
+# ── union_breaks ─────────────────────────────────────────────────────────────
+
+
+def test_union_breaks_fuses_overlapping_preroll():
+    """An opening-pass break overlapping a jingle ident becomes one cut, spanning
+    the union and keeping the ident source label."""
+    ident = _break_s(0, 32)
+    opening = AdBreak(
+        start_time=format_ms_to_time(0),
+        end_time=format_ms_to_time(113_000),
+        adverts=[
+            Advert(start_time="00:00:00.000", end_time="00:01:53.000", advert_for="Arnold Clark")
+        ],
+        source="opening_scan",
+    )
+    merged = union_breaks([ident, opening])
+    assert len(merged) == 1
+    assert merged[0].source == "acast_ident"
+    assert parse_time_to_ms(merged[0].start_time) == 0
+    assert parse_time_to_ms(merged[0].end_time) == 113_000
+    assert merged[0].adverts[0].advert_for == "Arnold Clark"
+
+
+def test_union_breaks_keeps_abutting_breaks_separate():
+    """Breaks that merely touch (one ends exactly where the next starts) are not
+    fused — only genuine overlaps are."""
+    lead = _break_s(380, 500, source="host_read")
+    ident = _break_s(500, 530)
+    merged = union_breaks([lead, ident])
+    assert len(merged) == 2
+    assert [parse_time_to_ms(b.end_time) for b in merged] == [500_000, 530_000]
+
+
+def test_union_breaks_leaves_disjoint_breaks_untouched():
+    a = _break_s(20, 80, source="opening_scan")
+    b = _break_s(500, 530)
+    c = _break_s(540, 570, source="host_read")
+    merged = union_breaks([c, a, b])  # unsorted input
+    assert [parse_time_to_ms(x.start_time) for x in merged] == [20_000, 500_000, 540_000]
+
+
+def test_union_breaks_concatenates_adverts_on_overlap():
+    first = AdBreak(
+        start_time=format_ms_to_time(0),
+        end_time=format_ms_to_time(40_000),
+        adverts=[Advert(start_time="00:00:00.000", end_time="00:00:40.000", advert_for="A")],
+        source="opening_scan",
+    )
+    second = AdBreak(
+        start_time=format_ms_to_time(30_000),
+        end_time=format_ms_to_time(70_000),
+        adverts=[Advert(start_time="00:00:30.000", end_time="00:01:10.000", advert_for="B")],
+        source="opening_scan",
+    )
+    merged = union_breaks([first, second])
+    assert len(merged) == 1
+    assert [a.advert_for for a in merged[0].adverts] == ["A", "B"]
+    assert parse_time_to_ms(merged[0].end_time) == 70_000
+
+
+def test_union_breaks_empty():
+    assert union_breaks([]) == []

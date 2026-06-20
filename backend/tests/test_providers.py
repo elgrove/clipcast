@@ -11,6 +11,7 @@ from app.models import (
     AnalysisReport,
     AppConfig,
 )
+from app.services.prompts import ADS_CONTEXT_FULL_EPISODE
 from app.services.providers import (
     ANALYSIS_TIMEOUT,
     AdBreaksResponse,
@@ -153,10 +154,10 @@ def test_get_ai_provider_returns_openrouter_provider(session):
     assert provider.model_config.name == "anthropic/claude-sonnet-4"
 
 
-# ── OpenRouterProvider analyse_ad_breaks ─────────────────────────────────────
+# ── OpenRouterProvider analyse_ads ───────────────────────────────────────────
 
 
-def test_openrouter_provider_analyse_ad_breaks_happy_path(monkeypatch):
+def test_openrouter_provider_analyse_ads_happy_path(monkeypatch):
     _patch_openai(monkeypatch, _fake_completion(cost=0.0042))
 
     provider_row, model = _openrouter_pair()
@@ -164,7 +165,7 @@ def test_openrouter_provider_analyse_ad_breaks_happy_path(monkeypatch):
     transcription = Transcription(segments=[])
     report = AnalysisReport()
 
-    result = provider.analyse_ad_breaks(transcription, report=report)
+    result = provider.analyse_ads(transcription, ADS_CONTEXT_FULL_EPISODE, report=report)
 
     assert len(result) == 1
     assert result[0].adverts[0].advert_for == "Squarespace"
@@ -192,7 +193,7 @@ def test_openrouter_provider_cost_falls_back_when_response_omits_cost(monkeypatc
     provider = OpenRouterProvider(provider_config=provider_row, model_config=model)
     report = AnalysisReport()
 
-    provider.analyse_ad_breaks(Transcription(segments=[]), report=report)
+    provider.analyse_ads(Transcription(segments=[]), ADS_CONTEXT_FULL_EPISODE, report=report)
 
     # Fell back to calculate_cost() with the model's per-million prices
     expected = provider.calculate_cost(1200, 80, model)
@@ -205,8 +206,9 @@ def test_openrouter_provider_appends_custom_instructions(monkeypatch):
 
     provider_row, model = _openrouter_pair()
     provider = OpenRouterProvider(provider_config=provider_row, model_config=model)
-    provider.analyse_ad_breaks(
+    provider.analyse_ads(
         Transcription(segments=[]),
+        ADS_CONTEXT_FULL_EPISODE,
         report=AnalysisReport(),
         custom_instructions="Ignore mentions of Patreon.",
     )
@@ -255,7 +257,7 @@ def test_get_ai_provider_openai_requires_api_key(session):
         get_ai_provider("analysis", config)
 
 
-def test_openai_provider_analyse_ad_breaks_happy_path(monkeypatch):
+def test_openai_provider_analyse_ads_happy_path(monkeypatch):
     # OpenAI's response has no `cost` field — base class falls back to calculate_cost
     _patch_openai(monkeypatch, _fake_completion(cost=None))
 
@@ -263,7 +265,9 @@ def test_openai_provider_analyse_ad_breaks_happy_path(monkeypatch):
     provider = OpenAIProvider(provider_config=provider_row, model_config=model)
     report = AnalysisReport()
 
-    result = provider.analyse_ad_breaks(Transcription(segments=[]), report=report)
+    result = provider.analyse_ads(
+        Transcription(segments=[]), ADS_CONTEXT_FULL_EPISODE, report=report
+    )
 
     assert len(result) == 1
     assert report.input_tokens == 1200
@@ -307,7 +311,9 @@ def test_openai_compatible_base_is_reusable_without_openrouter_overrides(monkeyp
     provider = _MyProvider(provider_config=provider_row, model_config=model)
     report = AnalysisReport()
 
-    result = provider.analyse_ad_breaks(Transcription(segments=[]), report=report)
+    result = provider.analyse_ads(
+        Transcription(segments=[]), ADS_CONTEXT_FULL_EPISODE, report=report
+    )
 
     assert len(result) == 1
     assert report.input_tokens == 1200

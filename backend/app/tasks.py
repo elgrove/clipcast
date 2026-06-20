@@ -430,7 +430,9 @@ def task_edit(self, episode_id: str, report_id: str) -> None:
         if not episode:
             raise ValueError(f"Episode not found: {episode_id}")
         config = session.get(AppConfig, "config")
-        keep_raw = config.keep_raw_episodes if config else True
+        keep_raw = (
+            config.keep_raw_episodes if config else True
+        ) or episode.podcast.keep_raw_episodes
         try:
             edit_episode(episode, keep_raw=keep_raw)
         except Exception as e:
@@ -534,12 +536,19 @@ def task_detect_acast_ads(self, episode_id: str, report_id: str) -> None:
 )
 def task_scan_acast_ads(self, episode_id: str, report_id: str) -> None:
     """After Acast ident detection, run an AI pass over the episode (still before
-    editing) that does two things:
+    editing). When too few jingle breaks are found for the episode length it falls
+    back to a whole-episode analysis; otherwise it does three things:
 
     1. **Reporting:** transcribe and itemise each jingle-bracketed ad section so
        the report records which advertisers appeared in the audio that gets cut.
-    2. **Host reads:** scan the content window following each break for a
+    2. **Opening pass:** a general ad-detection sweep over the start of the episode
+       (anchored at 0:00), to catch the pre-roll stack of programmatic and
+       host-read ads that has no reliable jingle to anchor on.
+    3. **Host reads:** scan the content window around each later break for a
        host-read third-party advert and append it as a new cut.
+
+    The ident, opening-pass, and host-read breaks are fused by ``union_breaks`` so
+    overlapping pre-roll cuts collapse into one clean span.
 
     Gated on the global ``scan_acast_ads`` config flag (default on); no-ops when
     disabled or when transcription/analysis models are unconfigured. In Acast
@@ -555,8 +564,15 @@ def task_scan_acast_ads(self, episode_id: str, report_id: str) -> None:
         merge_scan_windows,
         offset_ad_break,
         offset_adverts,
+        opening_scan_end_s,
+        union_breaks,
     )
     from app.services.analysis import analyse_transcription
+    from app.services.prompts import (
+        ADS_CONTEXT_CONFIRMED_BREAK,
+        ADS_CONTEXT_OPENING,
+        ADS_CONTEXT_POST_BREAK_WINDOW,
+    )
 
     with Session(engine) as session:
         report = session.get(ClippingReport, report_id)
@@ -657,6 +673,7 @@ def task_scan_acast_ads(self, episode_id: str, report_id: str) -> None:
         return breaks
 
     reported_idents: list[AdBreak] = []
+    opening_breaks: list[AdBreak] = []
     host_reads: list[AdBreak] = []
     sections_reported = 0
     windows: list[tuple[float, float]] = []
@@ -706,16 +723,28 @@ def task_scan_acast_ads(self, episode_id: str, report_id: str) -> None:
             transcription_report.completed_at = datetime.utcnow().isoformat()
             analysis_report.completed_at = datetime.utcnow().isoformat()
         else:
-            # 1. Report the adverts inside each ident-bracketed section.
+            opening_end_s = opening_scan_end_s(ident_breaks, audio_duration_s)
+            opening_end_ms = int(opening_end_s * 1000)
+
+            # 1. Report the adverts inside each ident-bracketed section. Sections
+            #    inside the opening region are left untouched here — the opening
+            #    pass (step 2) itemises and fuses them, so itemising twice would
+            #    double-count the same adverts.
             for br in ident_breaks:
-                if br.adverts:
+                if br.adverts or parse_time_to_ms(br.start_time) < opening_end_ms:
                     reported_idents.append(br)
                     continue
                 start_ms = parse_time_to_ms(br.start_time)
                 end_ms = parse_time_to_ms(br.end_time)
                 adverts: list[Advert] = []
                 if end_ms > start_ms:
-                    breaks = _scan_window(start_ms, end_ms, analyse_provider.analyse_acast_section)
+                    breaks = _scan_window(
+                        start_ms,
+                        end_ms,
+                        lambda t, sub: analyse_provider.analyse_ads(
+                            t, ADS_CONTEXT_CONFIRMED_BREAK, sub
+                        ),
+                    )
                     for found in breaks or []:
                         if found.adverts:
                             adverts.extend(offset_adverts(found.adverts, start_ms))
@@ -731,23 +760,48 @@ def task_scan_acast_ads(self, episode_id: str, report_id: str) -> None:
                     )
                 )
 
-            # 2. Scan the content around each break for host-read adverts: the
-            #    window AFTER each break (trailing) and the window BEFORE it
-            #    (leading). A host read can either follow a break or lead into
-            #    the next jingle; the leading pass catches reads that air just
-            #    before an ident bracket and so fall outside every trailing window.
-            windows = merge_scan_windows(
-                compute_trailing_windows(ident_breaks, audio_duration_s)
-                + compute_leading_windows(ident_breaks)
+            # 2. Opening pass: a general ad-detection sweep over the start of the
+            #    episode, anchored at 0:00. The pre-roll stacks programmatic and
+            #    host-read ads with no reliable jingle to anchor on, so the
+            #    jingle-windowed scan in step 3 misses them; this full-context
+            #    pass catches the lot. Its breaks are fused with any overlapping
+            #    ident break by union_breaks below.
+            breaks = _scan_window(
+                0,
+                opening_end_ms,
+                lambda t, sub: analyse_provider.analyse_ads(
+                    t, ADS_CONTEXT_OPENING, sub, custom_instructions=host_read_instructions
+                ),
             )
+            for br in breaks or []:
+                shifted = offset_ad_break(br, 0, source="opening_scan")
+                clamped = clamp_ad_break(shifted, 0, opening_end_ms)
+                if clamped is not None:
+                    opening_breaks.append(clamped)
+
+            # 3. Scan the content around each later break for a host-read advert:
+            #    the window AFTER each break (trailing) and BEFORE the next
+            #    (leading). Windows inside the opening region are dropped — the
+            #    opening pass already covered that audio.
+            windows = [
+                w
+                for w in merge_scan_windows(
+                    compute_trailing_windows(ident_breaks, audio_duration_s)
+                    + compute_leading_windows(ident_breaks)
+                )
+                if w[0] >= opening_end_s
+            ]
             for start_s, end_s in windows:
                 window_lo = int(start_s * 1000)
                 window_hi = int(end_s * 1000)
                 breaks = _scan_window(
                     window_lo,
                     window_hi,
-                    lambda transcription, sub: analyse_provider.analyse_host_reads(
-                        transcription, sub, custom_instructions=host_read_instructions
+                    lambda transcription, sub: analyse_provider.analyse_ads(
+                        transcription,
+                        ADS_CONTEXT_POST_BREAK_WINDOW,
+                        sub,
+                        custom_instructions=host_read_instructions,
                     ),
                 )
                 for br in breaks or []:
@@ -776,10 +830,12 @@ def task_scan_acast_ads(self, episode_id: str, report_id: str) -> None:
             f"{len(merged)} total after merge with {len(ident_breaks)} ident break(s)"
         )
     else:
-        merged = reported_idents + host_reads
+        merged = union_breaks(reported_idents + opening_breaks + host_reads)
         summary = (
-            f"Acast AI scan: reported ads in {sections_reported}/{len(ident_breaks)} "
-            f"section(s); {len(host_reads)} host-read(s) found across {len(windows)} window(s)"
+            f"Acast AI scan: {len(ident_breaks)} ident break(s), "
+            f"reported ads in {sections_reported} section(s); {len(opening_breaks)} "
+            f"opening-pass break(s); {len(host_reads)} host-read(s) across "
+            f"{len(windows)} window(s); {len(merged)} cut(s) after merge"
         )
 
     with Session(engine) as session:
@@ -1026,9 +1082,12 @@ def sync_and_process_new_episodes() -> dict[str, int]:
 # ── Cleanup tasks ───────────────────────────────────────────────────────────
 
 
-def _delete_episode_files(episode: PodcastEpisode) -> int:
+def _delete_episode_files(episode: PodcastEpisode, *, keep_raw: bool = False) -> int:
+    paths = [episode.mp3_path, episode.srt_path, episode.ad_breaks_path]
+    if not keep_raw:
+        paths.append(episode.raw_path)
     count = 0
-    for path in [episode.mp3_path, episode.raw_path, episode.srt_path, episode.ad_breaks_path]:
+    for path in paths:
         if path.exists():
             path.unlink()
             count += 1
@@ -1104,7 +1163,7 @@ def _cleanup_podcast_episodes(session: Session, podcast: PodcastShow) -> int:
     for ep in clipped_episodes:
         if ep.id in protected_ids:
             continue
-        files_deleted = _delete_episode_files(ep)
+        files_deleted = _delete_episode_files(ep, keep_raw=podcast.keep_raw_episodes)
         if files_deleted > 0:
             logger.info("Cleaned episode files: %s", ep.title)
         ep.cleaned_at = datetime.utcnow()
