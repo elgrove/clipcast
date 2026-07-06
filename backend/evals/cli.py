@@ -98,6 +98,16 @@ def _fmt_boundary_summary(b: Any) -> str:
     )
 
 
+def _fmt_acoustic_summary(a: Any) -> str:
+    """One-line kept-seam loudness summary: lower dBFS = cleaner cut."""
+    if a is None or getattr(a, "total_seams", 0) == 0:
+        return "no matches"
+    return (
+        f"start {a.start_dbfs_mean:.1f}dB  end {a.end_dbfs_mean:.1f}dB  "
+        f"overall {a.overall_dbfs_mean:.1f}dB  quiet {a.quiet_seams}/{a.total_seams}"
+    )
+
+
 def _print_model_run(m: run.ModelRunSummary) -> None:
     label = m.model or f"({m.provider})"
     print(f"\n── {label} ──")
@@ -115,6 +125,7 @@ def _print_model_run(m: run.ModelRunSummary) -> None:
         f"F1: {_fmt_pct(m.break_f1)}"
     )
     print(f"Break boundary: {_fmt_boundary_summary(m.break_boundary)}")
+    print(f"Boundary acoustic: {_fmt_acoustic_summary(m.acoustic)}")
     cost_str = f"${m.total_cost_usd:.4f}" if m.total_cost_usd else "$0.0000"
     print(
         f"Total cost: {cost_str}  "

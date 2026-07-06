@@ -16,6 +16,7 @@ from app.models import (
 from app.services.acast import detect_idents, idents_to_cut_regions, pair_idents
 from app.services.analysis import analyse_transcription
 
+from .acoustic import AcousticMetrics, acoustic_metrics
 from .metrics import (
     BoundaryMetrics,
     Interval,
@@ -190,6 +191,8 @@ class PipelineResult:
     name_similarity_mean: float = 0.0
     # Boundary deltas across required matches (predicted - expected, seconds)
     boundary: BoundaryMetrics | None = None
+    # Acoustic kept-seam loudness across required matches (dBFS; lower = cleaner)
+    acoustic: AcousticMetrics | None = None
     # Break-level metrics — touching ads clustered into ad breaks
     predicted_breaks: list[dict[str, Any]] = field(default_factory=list)
     expected_breaks: list[dict[str, Any]] = field(default_factory=list)
@@ -371,20 +374,23 @@ def run_case(
     started = time.monotonic()
     try:
         predicted_regions = _produce_cut_regions(case, use_acast, model, custom_prompt, result)
+        pred_intervals = [
+            Interval(
+                start=parse_time(r.start_time),
+                end=parse_time(r.end_time),
+                label=r.label,
+            )
+            for r in predicted_regions
+        ]
     except Exception as exc:
-        result.error = f"{type(exc).__name__}: {exc}"
+        raw = [
+            {"start_time": r.start_time, "end_time": r.end_time, "label": r.label}
+            for r in locals().get("predicted_regions", [])
+        ]
+        result.error = f"{type(exc).__name__}: {exc} | raw={raw}"
         result.duration_seconds = time.monotonic() - started
         return result
     result.duration_seconds = time.monotonic() - started
-
-    pred_intervals = [
-        Interval(
-            start=parse_time(r.start_time),
-            end=parse_time(r.end_time),
-            label=r.label,
-        )
-        for r in predicted_regions
-    ]
     exp_intervals = [
         Interval(
             start=e.start_time,
@@ -449,6 +455,7 @@ def run_case(
         for i in scores.matched_required
     ]
     result.boundary = boundary_metrics(ad_pairs)
+    result.acoustic = acoustic_metrics(case.audio_path, [p for p, _ in ad_pairs])
 
     # ── Break-level: touching ads clustered into ad breaks ───────────────────
     pred_breaks = cluster_regions(pred_intervals, break_cluster_gap_s)

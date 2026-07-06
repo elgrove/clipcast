@@ -5,6 +5,7 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
 
+from .acoustic import AcousticMetrics, acoustic_from_values
 from .metrics import BoundaryMetrics, boundary_metrics_from_deltas
 from .pipeline import EvalCase, PipelineResult, load_case, result_to_dict, run_case
 from .providers import ModelSpec, parse_model_spec
@@ -207,6 +208,7 @@ class ModelRunSummary:
     # Boundary drift (aggregated across required matches in all cases)
     boundary: BoundaryMetrics | None = None
     break_boundary: BoundaryMetrics | None = None
+    acoustic: AcousticMetrics | None = None
     # Cost / time
     total_cost_usd: float = 0.0
     total_input_tokens: int = 0
@@ -258,6 +260,7 @@ class RunSummary:
                     "break_f1": m.break_f1,
                     "boundary": asdict(m.boundary) if m.boundary else None,
                     "break_boundary": asdict(m.break_boundary) if m.break_boundary else None,
+                    "acoustic": asdict(m.acoustic) if m.acoustic else None,
                     "total_cost_usd": m.total_cost_usd,
                     "total_input_tokens": m.total_input_tokens,
                     "total_output_tokens": m.total_output_tokens,
@@ -315,6 +318,18 @@ def _aggregate_boundary(results: list[PipelineResult], attr: str) -> BoundaryMet
         starts.extend(b.start_deltas)
         ends.extend(b.end_deltas)
     return boundary_metrics_from_deltas(starts, ends)
+
+
+def _aggregate_acoustic(results: list[PipelineResult]) -> AcousticMetrics:
+    starts: list[float] = []
+    ends: list[float] = []
+    for r in results:
+        a = r.acoustic
+        if a is None or a.total_seams == 0:
+            continue
+        starts.extend(a.start_dbfs)
+        ends.extend(a.end_dbfs)
+    return acoustic_from_values(starts, ends)
 
 
 def execute_run(config: RunConfig) -> RunSummary:
@@ -387,6 +402,7 @@ def execute_run(config: RunConfig) -> RunSummary:
                     break_f1=br_f1,
                     boundary=_aggregate_boundary(combined, "boundary"),
                     break_boundary=_aggregate_boundary(combined, "break_boundary"),
+                    acoustic=_aggregate_acoustic(combined),
                     total_cost_usd=sum(res.cost_usd or 0.0 for res in combined),
                     total_input_tokens=sum(res.input_tokens or 0 for res in combined),
                     total_output_tokens=sum(res.output_tokens or 0 for res in combined),
@@ -418,6 +434,7 @@ def execute_run(config: RunConfig) -> RunSummary:
                 break_f1=br_f1,
                 boundary=_aggregate_boundary(acast_results, "boundary"),
                 break_boundary=_aggregate_boundary(acast_results, "break_boundary"),
+                acoustic=_aggregate_acoustic(acast_results),
                 total_cost_usd=0.0,
                 total_input_tokens=0,
                 total_output_tokens=0,
