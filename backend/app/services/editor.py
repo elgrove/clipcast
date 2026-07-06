@@ -2,11 +2,14 @@ import logging
 import os
 import shutil
 import tempfile
+from collections.abc import Callable
 from pathlib import Path
 
 from pydub import AudioSegment
 
+from app.config import settings
 from app.models import AdBreak, PodcastEpisode
+from app.services.silence import detect_silences, snap_boundary
 
 logger = logging.getLogger(__name__)
 
@@ -105,7 +108,68 @@ def apply_cuts_inplace(
     return len(segments)
 
 
-def edit_episode(episode: PodcastEpisode, *, keep_raw: bool = True, force: bool = False) -> None:
+def snap_breaks_to_silence(source_path: Path, breaks: list[AdBreak]) -> tuple[list[AdBreak], str]:
+    """Snap each ad-break edge into the nearest pause so cuts don't leave advert
+    fragments or jingle flashes. Runs one ffmpeg silencedetect pass over
+    ``source_path``; detection and window parameters come from settings. Returns
+    the adjusted breaks and a one-line summary of the per-edge outcomes. A break
+    whose snapped edges would collapse (end <= start) keeps its original edges."""
+    silences, duration_ms = detect_silences(
+        source_path,
+        threshold_db=settings.silence_threshold_db,
+        min_duration_s=settings.silence_min_duration,
+    )
+
+    outcomes = {"edge": 0, "silence": 0, "pad": 0, "kept": 0}
+    snapped: list[AdBreak] = []
+    for br in breaks:
+        start_ms = parse_time_to_ms(br.start_time)
+        end_ms = parse_time_to_ms(br.end_time)
+        new_start, start_outcome = snap_boundary(
+            silences,
+            start_ms,
+            "ad_start",
+            duration_ms=duration_ms,
+            search_window_ms=settings.silence_search_window_ms,
+            snap_to_edge_ms=settings.silence_snap_to_edge_ms,
+            pad_ms=settings.silence_no_match_pad_ms,
+        )
+        new_end, end_outcome = snap_boundary(
+            silences,
+            end_ms,
+            "ad_end",
+            duration_ms=duration_ms,
+            search_window_ms=settings.silence_search_window_ms,
+            snap_to_edge_ms=settings.silence_snap_to_edge_ms,
+            pad_ms=settings.silence_no_match_pad_ms,
+        )
+        if new_end <= new_start:
+            new_start, new_end, start_outcome, end_outcome = start_ms, end_ms, "kept", "kept"
+        outcomes[start_outcome] += 1
+        outcomes[end_outcome] += 1
+        snapped.append(
+            AdBreak(
+                start_time=format_ms_to_time(new_start),
+                end_time=format_ms_to_time(new_end),
+                adverts=br.adverts,
+                source=br.source,
+            )
+        )
+
+    summary = (
+        f"Silence-snap: {outcomes['silence']} edge(s)→pause, {outcomes['edge']}→episode-edge, "
+        f"{outcomes['pad']} padded, {outcomes['kept']} kept ({len(breaks) * 2} edges total)"
+    )
+    return snapped, summary
+
+
+def edit_episode(
+    episode: PodcastEpisode,
+    *,
+    keep_raw: bool = True,
+    force: bool = False,
+    log: Callable[[str], None] | None = None,
+) -> None:
     if not episode.mp3_path.exists():
         raise ValueError(f"Episode {episode.title} has no downloaded MP3")
 
@@ -117,6 +181,13 @@ def edit_episode(episode: PodcastEpisode, *, keep_raw: bool = True, force: bool 
 
     logger.info("Editing episode: %s", episode.title)
 
+    breaks = episode.ad_breaks
+    if settings.silence_refinement_enabled:
+        breaks, summary = snap_breaks_to_silence(episode.mp3_path, breaks)
+        logger.info("%s: %s", episode.title, summary)
+        if log is not None:
+            log(summary)
+
     if keep_raw:
         temp_fd, temp_path_str = tempfile.mkstemp(suffix=".mp3")
         temp_path = Path(temp_path_str)
@@ -125,7 +196,7 @@ def edit_episode(episode: PodcastEpisode, *, keep_raw: bool = True, force: bool 
         try:
             shutil.copy(episode.mp3_path, temp_path)
 
-            cuts = apply_cuts_inplace(episode.mp3_path, episode.ad_breaks, label=episode.title)
+            cuts = apply_cuts_inplace(episode.mp3_path, breaks, label=episode.title)
             if cuts == 0:
                 return
 
@@ -136,7 +207,7 @@ def edit_episode(episode: PodcastEpisode, *, keep_raw: bool = True, force: bool 
             if temp_path.exists():
                 temp_path.unlink()
     else:
-        cuts = apply_cuts_inplace(episode.mp3_path, episode.ad_breaks, label=episode.title)
+        cuts = apply_cuts_inplace(episode.mp3_path, breaks, label=episode.title)
         if cuts == 0:
             return
         logger.info("Edited episode (no raw backup), removed %d segments", cuts)

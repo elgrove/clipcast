@@ -27,6 +27,13 @@ def test_settings(tmp_path, monkeypatch):
         ),
     )
 
+    # Silence-snap defaults ON in production. Disable it for the tests that don't
+    # exercise it (the editor binds `settings` at import, so patch that object's
+    # attribute); dedicated silence tests re-enable it on the same object.
+    import app.services.editor as editor_module
+
+    monkeypatch.setattr(editor_module.settings, "silence_refinement_enabled", False)
+
     # Set Celery to eager mode so tasks run synchronously without Redis
     from app.worker import celery_app
 
