@@ -179,14 +179,41 @@
 		}
 	}
 
+	async function copyToClipboard(text: string): Promise<boolean> {
+		// navigator.clipboard is only available in secure contexts (HTTPS or
+		// localhost); self-hosted instances served over plain HTTP fall back to
+		// the legacy execCommand path, which works within a user gesture.
+		if (window.isSecureContext && navigator.clipboard) {
+			try {
+				await navigator.clipboard.writeText(text);
+				return true;
+			} catch {
+				// fall through to the legacy path
+			}
+		}
+		try {
+			const textarea = document.createElement('textarea');
+			textarea.value = text;
+			textarea.style.position = 'fixed';
+			textarea.style.opacity = '0';
+			document.body.appendChild(textarea);
+			textarea.focus();
+			textarea.select();
+			const ok = document.execCommand('copy');
+			document.body.removeChild(textarea);
+			return ok;
+		} catch {
+			return false;
+		}
+	}
+
 	async function copyRssFeed() {
 		if (!podcast) return;
 		showOverflowMenu = false;
 		const url = `${window.location.origin}/feed/${podcast.itunes_id}`;
-		try {
-			await navigator.clipboard.writeText(url);
+		if (await copyToClipboard(url)) {
 			toasts.addToast('success', 'RSS feed link copied');
-		} catch {
+		} else {
 			toasts.addToast('error', 'Failed to copy link');
 		}
 	}
