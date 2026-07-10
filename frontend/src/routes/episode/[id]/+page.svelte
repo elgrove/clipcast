@@ -10,6 +10,7 @@
 	} from '$lib/api';
 	import { toasts } from '$lib/stores';
 	import { formatDurationShort } from '$lib/utils';
+	import ShowNotes from '$lib/components/ShowNotes.svelte';
 	import type { EpisodeDetail, TranscriptionSegment, ClippingReport } from '$lib/types';
 
 	let episodeId = $state('');
@@ -58,8 +59,8 @@
 		return h > 0 ? `${h}h ${m}m` : `${m}m`;
 	}
 
-	function stripHtml(html: string): string {
-		return html.replace(/<[^>]*>/g, '').trim();
+	function hasText(html: string | null): boolean {
+		return !!html && html.replace(/<[^>]*>/g, '').replace(/&nbsp;/g, ' ').trim().length > 0;
 	}
 
 	function parseTimeToSeconds(t: string): number {
@@ -291,16 +292,11 @@
 		{/if}
 
 		<!-- Description -->
-		{#if episode.description}
-			{@const cleanDescription = stripHtml(episode.description)}
-			{#if cleanDescription}
-				<div>
-					<h2 class="text-sm font-semibold text-zinc-900 dark:text-white">Show notes</h2>
-					<p class="mt-2 whitespace-pre-line text-sm leading-relaxed text-zinc-600 dark:text-zinc-400">
-						{cleanDescription}
-					</p>
-				</div>
-			{/if}
+		{#if hasText(episode.description)}
+			<div>
+				<h2 class="text-sm font-semibold text-zinc-900 dark:text-white">Show notes</h2>
+				<ShowNotes html={episode.description} class="mt-2" />
+			</div>
 		{/if}
 
 		<!-- Ad breaks -->
