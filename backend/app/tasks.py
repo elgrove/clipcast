@@ -434,7 +434,7 @@ def task_edit(self, episode_id: str, report_id: str) -> None:
             config.keep_raw_episodes if config else True
         ) or episode.podcast.keep_raw_episodes
         try:
-            edit_episode(episode, keep_raw=keep_raw)
+            edit_episode(episode, keep_raw=keep_raw, log=lambda m: _log_report(report_id, m))
         except Exception as e:
             _fail_report(report_id, e, f"Editing failed: {e}")
             raise
