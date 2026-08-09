@@ -18,9 +18,8 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Literal, Protocol
 
-from pydub import AudioSegment
-
 from app.models import RefinementReport
+from app.services import audio
 from app.services.editor import format_ms_to_time
 
 SNAP_TO_EDGE_MS = 5000  # snap an outer ad-break edge to 0 / episode-end if within this gap
@@ -42,7 +41,7 @@ class RefinementProvider(Protocol):
 
 def refine_or_snap_boundary(
     *,
-    audio: AudioSegment,
+    audio_path: Path,
     episode_duration_ms: int,
     boundary_ms: int,
     direction: Literal["ad_start", "ad_end"],
@@ -82,12 +81,11 @@ def refine_or_snap_boundary(
         _emit(f"{direction}: window collapsed, keeping original boundary")
         return boundary_ms
 
-    window_audio = audio[window_start_ms:window_end_ms]
     temp_fd, temp_path_str = tempfile.mkstemp(suffix=".mp3")
     temp_path = Path(temp_path_str)
     os.close(temp_fd)
     try:
-        window_audio.export(temp_path, format="mp3")
+        audio.extract_window(audio_path, window_start_ms, window_end_ms, temp_path)
         offset_in_window = provider.refine_boundary(
             audio_path=temp_path,
             direction=direction,

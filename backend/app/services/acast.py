@@ -3,9 +3,9 @@ from urllib.parse import urlparse
 
 import numpy as np
 import scipy.signal
-from pydub import AudioSegment
 
 from app.models import AdBreak, Advert
+from app.services import audio
 from app.services.editor import format_ms_to_time, parse_time_to_ms
 
 IDENT_PATH = Path(__file__).parent.parent / "assets/acast_ident.wav"
@@ -48,8 +48,7 @@ def acast_feed_url_heuristic(feed_url: str) -> bool:
 
 
 def _load_mono_16k(path: Path) -> np.ndarray:
-    seg = AudioSegment.from_file(path).set_channels(1).set_frame_rate(SAMPLE_RATE)
-    return np.array(seg.get_array_of_samples(), dtype=np.float32) / 32768.0
+    return audio.decode_mono(path, SAMPLE_RATE)
 
 
 def _format_time(seconds: float) -> str:
@@ -80,21 +79,34 @@ def detect_idents(audio_path: Path) -> tuple[list[tuple[float, float]], float]:
     if ident_norm < 1e-10:
         return [], audio_duration
 
-    # Normalised cross-correlation using fftconvolve (overlap-add, bounded memory)
-    cross_corr = scipy.signal.fftconvolve(episode, ident_centred[::-1], "valid")
+    # Normalised cross-correlation. `oaconvolve` (overlap-add) rather than
+    # `fftconvolve`, which would FFT the whole episode in one buffer. Each
+    # full-length array here is ~230 MB for a one-hour episode, so every step
+    # below stays in float32 and reuses its buffers instead of naming a fresh
+    # temporary per line.
+    cross_corr = scipy.signal.oaconvolve(episode, ident_centred[::-1], "valid")
 
-    ones = np.ones(n)
-    local_sum = scipy.signal.fftconvolve(episode, ones, "valid")
-    local_sum_sq = scipy.signal.fftconvolve(episode**2, ones, "valid")
-    local_mean = local_sum / n
-    local_var = np.maximum(local_sum_sq / n - local_mean**2, 0.0)
-    local_std = np.sqrt(local_var)
+    ones = np.ones(n, dtype=np.float32)
+    local_mean = scipy.signal.oaconvolve(episode, ones, "valid")
+    local_mean /= n
+    np.square(episode, out=episode)  # not needed unsquared past this point
+    denominator = scipy.signal.oaconvolve(episode, ones, "valid")
+    denominator /= n
+    del episode
 
-    # NCC in [-1, 1]: divide by sqrt(N) * local_std * ident_norm
-    denominator = np.sqrt(n) * local_std * ident_norm
-    normalised = np.clip(cross_corr / np.where(denominator > 1e-10, denominator, 1e-10), -1.0, 1.0)
+    # E[x²] - E[x]² → variance → std → sqrt(N) * std * ident_norm, in place
+    denominator -= np.square(local_mean)
+    del local_mean
+    np.maximum(denominator, 0.0, out=denominator)
+    np.sqrt(denominator, out=denominator)
+    denominator *= float(np.sqrt(n)) * ident_norm
 
-    peak_indices = np.where(normalised > THRESHOLD)[0]
+    # NCC in [-1, 1]
+    np.maximum(denominator, 1e-10, out=denominator)
+    np.divide(cross_corr, denominator, out=cross_corr)
+    np.clip(cross_corr, -1.0, 1.0, out=cross_corr)
+
+    peak_indices = np.where(cross_corr > THRESHOLD)[0]
 
     # Non-maximum suppression: keep only peaks separated by at least 3x ident
     # length. 2x lets ringing/echo partials (score ~0.9) slip through just

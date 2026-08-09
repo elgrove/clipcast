@@ -6,7 +6,6 @@ from datetime import datetime, timedelta
 from pathlib import Path
 
 from celery import chain
-from pydub import AudioSegment
 from sqlmodel import Session, select
 
 from app.database import engine
@@ -23,6 +22,7 @@ from app.models import (
     RefinementReport,
     TranscriptionReport,
 )
+from app.services import audio
 from app.services.download import download_episode
 from app.services.editor import edit_episode, format_ms_to_time, parse_time_to_ms
 from app.services.providers import get_ai_provider
@@ -328,9 +328,7 @@ def task_refine_boundaries(self, episode_id: str, report_id: str) -> None:
 
     refined_breaks: list[AdBreak] = []
     try:
-        with open(audio_path, "rb") as fh:
-            audio = AudioSegment.from_file(fh, format="mp3")
-        episode_duration_ms = len(audio)
+        episode_duration_ms = audio.duration_ms(audio_path)
 
         for index, ad_break in enumerate(breaks, start=1):
             break_start_ms = parse_time_to_ms(ad_break.start_time)
@@ -340,7 +338,7 @@ def task_refine_boundaries(self, episode_id: str, report_id: str) -> None:
                 _log_report(report_id, message)
 
             new_start_ms = refine_or_snap_boundary(
-                audio=audio,
+                audio_path=audio_path,
                 episode_duration_ms=episode_duration_ms,
                 break_index=index,
                 boundary_ms=break_start_ms,
@@ -350,7 +348,7 @@ def task_refine_boundaries(self, episode_id: str, report_id: str) -> None:
                 log=log,
             )
             new_end_ms = refine_or_snap_boundary(
-                audio=audio,
+                audio_path=audio_path,
                 episode_duration_ms=episode_duration_ms,
                 break_index=index,
                 boundary_ms=break_end_ms,
@@ -653,12 +651,11 @@ def task_scan_acast_ads(self, episode_id: str, report_id: str) -> None:
         """Export the [start_ms, end_ms) slice, transcribe it, and run ``analyse``
         (a provider method taking a Transcription). Returns the window-relative
         breaks, or None if the slice had no speech."""
-        clip = audio[start_ms:end_ms]
         temp_fd, temp_path_str = tempfile.mkstemp(suffix=".mp3")
         temp_path = Path(temp_path_str)
         os.close(temp_fd)
         try:
-            clip.export(temp_path, format="mp3")
+            audio.extract_window(audio_path, start_ms, end_ms, temp_path)
             sub_transcription = TranscriptionReport()
             transcription = transcribe_provider.transcribe(temp_path, sub_transcription)
             if not transcription.segments:
@@ -680,9 +677,7 @@ def task_scan_acast_ads(self, episode_id: str, report_id: str) -> None:
     fallback_breaks: list[AdBreak] | None = None
     fallback_ai_count = 0
     try:
-        with open(audio_path, "rb") as fh:
-            audio = AudioSegment.from_file(fh, format="mp3")
-        audio_duration_s = len(audio) / 1000.0
+        audio_duration_s = audio.duration_ms(audio_path) / 1000.0
 
         expected = expected_acast_breaks(audio_duration_s)
         if len(ident_breaks) < expected:

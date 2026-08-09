@@ -4,9 +4,8 @@ import shutil
 import tempfile
 from pathlib import Path
 
-from pydub import AudioSegment
-
 from app.models import AdBreak, PodcastEpisode
+from app.services import audio
 
 logger = logging.getLogger(__name__)
 
@@ -63,11 +62,6 @@ def apply_cuts_inplace(
     (defaults to `source_path`). Returns the number of cuts applied. Breaks
     with `end <= start` are skipped."""
     target = output_path or source_path
-    # Open via file handle: pydub treats any .raw filename suffix as raw PCM
-    # (including our raw_path backup naming `.mp3.raw`), so passing a path
-    # directly would fail. The handle has no recognised extension.
-    with open(source_path, "rb") as fh:
-        audio = AudioSegment.from_file(fh, format="mp3")
 
     segments = []
     for br in breaks:
@@ -85,23 +79,32 @@ def apply_cuts_inplace(
 
     segments.sort(key=lambda x: x[0])
 
-    segments_to_keep = []
+    total_ms = audio.duration_ms(source_path)
+    ranges_to_keep = []
     current_pos = 0
     for start_ms, end_ms in segments:
-        if start_ms > current_pos:
-            segments_to_keep.append(audio[current_pos:start_ms])
+        keep_end = min(start_ms, total_ms)
+        if keep_end > current_pos:
+            ranges_to_keep.append((current_pos, keep_end))
         current_pos = max(current_pos, end_ms)
-    if current_pos < len(audio):
-        segments_to_keep.append(audio[current_pos:])
+    if current_pos < total_ms:
+        ranges_to_keep.append((current_pos, total_ms))
 
-    if not segments_to_keep:
+    if not ranges_to_keep:
         return 0
 
-    result = segments_to_keep[0]
-    for segment in segments_to_keep[1:]:
-        result += segment
+    # ffmpeg cannot read and write the same file, so build alongside the target
+    # and swap in — the rename keeps the write atomic for a target being served.
+    temp_fd, temp_path_str = tempfile.mkstemp(suffix=".mp3", dir=target.parent)
+    temp_path = Path(temp_path_str)
+    os.close(temp_fd)
+    try:
+        audio.keep_ranges(source_path, ranges_to_keep, temp_path)
+        os.replace(temp_path, target)
+    finally:
+        if temp_path.exists():
+            temp_path.unlink()
 
-    result.export(target, format="mp3")
     return len(segments)
 
 

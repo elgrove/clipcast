@@ -334,7 +334,6 @@ dependencies = [
     { name = "numpy" },
     { name = "openai" },
     { name = "pydantic-settings" },
-    { name = "pydub" },
     { name = "python-multipart" },
     { name = "requests" },
     { name = "scipy" },
@@ -345,6 +344,7 @@ dependencies = [
 
 [package.dev-dependencies]
 dev = [
+    { name = "pydub" },
     { name = "pytest" },
     { name = "pytest-asyncio" },
     { name = "pytest-mock" },
@@ -364,7 +364,6 @@ requires-dist = [
     { name = "numpy", specifier = ">=2.0" },
     { name = "openai", specifier = ">=1.55.0" },
     { name = "pydantic-settings", specifier = ">=2.7.0" },
-    { name = "pydub", specifier = ">=0.25.1" },
     { name = "python-multipart", specifier = ">=0.0.18" },
     { name = "requests", specifier = ">=2.32.5" },
     { name = "scipy", specifier = ">=1.13" },
@@ -375,6 +374,7 @@ requires-dist = [
 
 [package.metadata.requires-dev]
 dev = [
+    { name = "pydub", specifier = ">=0.25.1" },
     { name = "pytest", specifier = ">=9.0.2" },
     { name = "pytest-asyncio", specifier = ">=0.25.0" },
     { name = "pytest-mock", specifier = ">=3.15.1" },
