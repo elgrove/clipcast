@@ -6,14 +6,13 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any, Literal
 
-from pydub import AudioSegment
-
 from app.models import (
     AdBreak,
     AnalysisReport,
     RefinementReport,
     TranscriptionSegment,
 )
+from app.services import audio
 from app.services.acast import detect_idents, idents_to_ad_breaks, pair_idents
 from app.services.analysis import analyse_transcription
 from app.services.editor import format_ms_to_time, parse_time_to_ms
@@ -289,8 +288,7 @@ def _produce_ad_breaks(
         return []
 
     audio_path = case.require_audio()
-    audio = AudioSegment.from_file(audio_path)
-    episode_duration_ms = len(audio)
+    episode_duration_ms = audio.duration_ms(audio_path)
 
     refinement_provider = build_provider(refinement_model)
     refinement_report = RefinementReport(
@@ -304,7 +302,7 @@ def _produce_ad_breaks(
         end_ms = parse_time_to_ms(br.end_time)
 
         new_start_ms = refine_or_snap_boundary(
-            audio=audio,
+            audio_path=audio_path,
             episode_duration_ms=episode_duration_ms,
             break_index=index,
             boundary_ms=start_ms,
@@ -313,7 +311,7 @@ def _produce_ad_breaks(
             refinement_report=refinement_report,
         )
         new_end_ms = refine_or_snap_boundary(
-            audio=audio,
+            audio_path=audio_path,
             episode_duration_ms=episode_duration_ms,
             break_index=index,
             boundary_ms=end_ms,

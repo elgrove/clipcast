@@ -1,7 +1,9 @@
 from pathlib import Path
 
+import numpy as np
 import pytest
 from pydub import AudioSegment
+from pydub.generators import Sine
 
 from app.models import AdBreak
 from app.services.editor import (
@@ -121,6 +123,34 @@ def test_apply_cuts_inplace_overlapping_cuts(tmp_path):
     assert cuts == 2
     out = AudioSegment.from_mp3(target)
     assert len(out) == pytest.approx(5_000, abs=200)
+
+
+def test_apply_cuts_inplace_keeps_surviving_audio_in_order(tmp_path):
+    """The cut is assembled by an ffmpeg filter graph, so assert on content and
+    not just duration: a mis-wired graph can produce the right length from the
+    wrong segments."""
+    from app.services.audio import decode_mono
+
+    source = tmp_path / "raw.mp3"
+    target = tmp_path / "out.mp3"
+    loud = Sine(440).to_audio_segment(duration=2_000).apply_gain(-3)
+    quiet = Sine(440).to_audio_segment(duration=2_000).apply_gain(-30)
+    (loud + AudioSegment.silent(duration=2_000) + quiet).export(source, format="mp3")
+
+    cuts = apply_cuts_inplace(source, [_break(2, 4)], output_path=target)
+
+    assert cuts == 1
+    samples = decode_mono(target, 16_000)
+    assert len(samples) == pytest.approx(4 * 16_000, abs=16_000 // 2)
+    first_half = samples[: len(samples) // 2]
+    second_half = samples[len(samples) // 2 :]
+    # Loud section survived ahead of the quiet one, with the silence gone.
+    assert _rms(first_half) > _rms(second_half) * 5
+    assert _rms(second_half) > 0
+
+
+def _rms(samples) -> float:
+    return float(np.sqrt(np.mean(np.square(samples))))
 
 
 # ── edit_episode (keep_raw flag) ──────────────────────────────────────────────
