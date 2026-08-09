@@ -22,7 +22,7 @@ from app.models import (
     RefinementReport,
     TranscriptionReport,
 )
-from app.services import audio
+from app.services import audio, bbc
 from app.services.download import download_episode
 from app.services.editor import edit_episode, format_ms_to_time, parse_time_to_ms
 from app.services.providers import get_ai_provider
@@ -850,6 +850,188 @@ def task_scan_acast_ads(self, episode_id: str, report_id: str) -> None:
     ad_breaks_path.write_text(json.dumps({"breaks": [b.model_dump() for b in merged]}, indent=2))
 
 
+@celery_app.task(
+    name="app.tasks.task_trim_scan",
+    bind=True,
+    max_retries=3,
+    default_retry_delay=60,
+    autoretry_for=(Exception,),
+    retry_backoff=True,
+    retry_backoff_max=600,
+    soft_time_limit=7200,
+    time_limit=7500,
+)
+def task_trim_scan(self, episode_id: str, report_id: str) -> None:
+    """BBC trim scan: transcribe the episode's head and tail windows, ask the
+    analysis model where the show content really starts and ends, silence-snap
+    both boundaries, and store the trim as two cuts in the ad-breaks format so
+    ``task_edit`` and the episode UI work unchanged. Unusable model output
+    leaves the episode uncut and flags the report — never mangle audio on a
+    bad guess."""
+    with Session(engine) as session:
+        episode = session.get(PodcastEpisode, episode_id)
+        if not episode:
+            raise ValueError(f"Episode not found: {episode_id}")
+
+        if episode.ad_breaks:
+            _log_report(report_id, "Trim scan already done, skipping")
+            return
+
+        config = session.get(AppConfig, "config")
+        if not config or not config.transcription_model or not config.analysis_model:
+            _log_report(
+                report_id,
+                "WARNING: Trim scan skipped — transcription/analysis model not "
+                "configured; episode left uncut",
+            )
+            _update_report(
+                report_id, transcribed_at=datetime.utcnow(), analysed_at=datetime.utcnow()
+            )
+            return
+
+        try:
+            transcribe_provider = get_ai_provider("transcription", config)
+            analyse_provider = get_ai_provider("analysis", config)
+        except ValueError as e:
+            _log_report(report_id, f"WARNING: Trim scan skipped — {e}; episode left uncut")
+            _update_report(
+                report_id, transcribed_at=datetime.utcnow(), analysed_at=datetime.utcnow()
+            )
+            return
+
+        audio_path = episode.mp3_path
+        ad_breaks_path = episode.ad_breaks_path
+        episode_title = episode.title
+        episode_description = episode.description
+        transcription_provider_name = config.transcription_model.provider.kind
+        transcription_model_name = config.transcription_model.name
+        analysis_provider_name = config.analysis_model.provider.kind
+        analysis_model_name = config.analysis_model.name
+        transcription_model_id = config.transcription_model_id
+        analysis_model_id = config.analysis_model_id
+
+    _log_report(report_id, "Scanning episode head and tail for BBC wrapper audio...")
+    _update_report(report_id, transcription_model_id=transcription_model_id)
+
+    transcription_report = TranscriptionReport(
+        started_at=datetime.utcnow().isoformat(),
+        provider=transcription_provider_name,
+        model_name=transcription_model_name,
+    )
+    analysis_report = AnalysisReport(
+        started_at=datetime.utcnow().isoformat(),
+        provider=analysis_provider_name,
+        model_name=analysis_model_name,
+    )
+
+    def _transcribe_window(start_ms: int, end_ms: int, dest: Path):
+        audio.extract_window(audio_path, start_ms, end_ms, dest)
+        sub = TranscriptionReport()
+        transcription = transcribe_provider.transcribe(dest, sub)
+        transcription_report.input_tokens = (transcription_report.input_tokens or 0) + (
+            sub.input_tokens or 0
+        )
+        transcription_report.output_tokens = (transcription_report.output_tokens or 0) + (
+            sub.output_tokens or 0
+        )
+        transcription_report.cost_usd = (transcription_report.cost_usd or 0.0) + (
+            sub.cost_usd or 0.0
+        )
+        return transcription
+
+    breaks: list[AdBreak] = []
+    failure: str | None = None
+    head_fd, head_path_str = tempfile.mkstemp(suffix=".mp3")
+    tail_fd, tail_path_str = tempfile.mkstemp(suffix=".mp3")
+    head_path, tail_path = Path(head_path_str), Path(tail_path_str)
+    os.close(head_fd)
+    os.close(tail_fd)
+    try:
+        duration_s = audio.duration_ms(audio_path) / 1000.0
+        head_len_s = min(bbc.HEAD_WINDOW_S, duration_s)
+        tail_offset_s = max(0.0, duration_s - bbc.TAIL_WINDOW_S)
+        tail_len_s = duration_s - tail_offset_s
+
+        head_transcription = _transcribe_window(0, int(head_len_s * 1000), head_path)
+        tail_transcription = _transcribe_window(
+            int(tail_offset_s * 1000), int(duration_s * 1000), tail_path
+        )
+
+        prompt = bbc.build_trim_prompt(
+            episode_title,
+            episode_description,
+            bbc.format_transcript(head_transcription),
+            bbc.format_transcript(tail_transcription),
+            head_len_s,
+            tail_len_s,
+            tail_offset_s,
+        )
+        trim = analyse_provider.analyse_trim(prompt, analysis_report)
+
+        failure = bbc.validate_trim(
+            trim.content_start_s, trim.content_end_s, head_len_s, tail_len_s, tail_offset_s
+        )
+        if failure is None:
+            content_start_s = trim.content_start_s
+            content_end_s = tail_offset_s + trim.content_end_s
+            # Snap each boundary only when it will actually produce a cut — a
+            # boundary at the window edge means "nothing to trim" and must not
+            # be dragged to a nearby silence.
+            if content_start_s >= bbc.MIN_TRIM_S:
+                content_start_s = bbc.snap_head_cut(bbc.detect_silences(head_path), content_start_s)
+            if duration_s - content_end_s >= bbc.MIN_TRIM_S:
+                snapped_rel = bbc.snap_tail_cut(bbc.detect_silences(tail_path), trim.content_end_s)
+                content_end_s = tail_offset_s + snapped_rel
+            breaks = bbc.trim_to_breaks(
+                content_start_s, content_end_s, duration_s, trim.head_reason, trim.tail_reason
+            )
+
+        transcription_report.completed_at = datetime.utcnow().isoformat()
+        analysis_report.completed_at = datetime.utcnow().isoformat()
+    except Exception as e:
+        transcription_report.error = str(e)
+        with Session(engine) as session:
+            report = session.get(ClippingReport, report_id)
+            report.transcription_report = transcription_report
+            report.add_exception(e)
+            report.append_log(f"Trim scan failed: {e}")
+            session.add(report)
+            session.commit()
+        raise
+    finally:
+        for temp_path in (head_path, tail_path):
+            if temp_path.exists():
+                temp_path.unlink()
+
+    if failure:
+        summary = f"WARNING: Trim detection failed — episode left uncut: {failure}"
+        analysis_report.warnings = summary
+    else:
+        described = "; ".join(
+            f"{b.source} {b.start_time}-{b.end_time} ({b.adverts[0].advert_for})" for b in breaks
+        )
+        summary = f"BBC trim: {len(breaks)} cut(s)" + (f" — {described}" if described else "")
+    analysis_report.ad_breaks_found = len(breaks)
+
+    with Session(engine) as session:
+        episode = session.get(PodcastEpisode, episode_id)
+        episode.ad_breaks = breaks
+        session.add(episode)
+        session.commit()
+
+        report = session.get(ClippingReport, report_id)
+        report.transcription_report = transcription_report
+        report.analysis_report = analysis_report
+        report.analysis_model_id = analysis_model_id
+        report.transcribed_at = datetime.utcnow()
+        report.analysed_at = datetime.utcnow()
+        report.append_log(summary)
+        session.add(report)
+        session.commit()
+
+    ad_breaks_path.write_text(json.dumps({"breaks": [b.model_dump() for b in breaks]}, indent=2))
+
+
 # ── Queue orchestration ──────────────────────────────────────────────────────
 
 
@@ -879,20 +1061,25 @@ def queue_episode_for_clipping(
     session.refresh(report)
 
     clip_mode = episode.podcast.clip_mode
+    transcription_queue = _get_transcription_queue(session)
 
     if clip_mode == ClipMode.ACAST:
         # The Acast AI scan is a config-gated no-op unless enabled; it transcribes
         # and analyses short windows so it runs on the transcription queue.
-        transcription_queue = _get_transcription_queue(session)
         pipeline = chain(
             task_download.si(episode.id, report.id),
             task_detect_acast_ads.si(episode.id, report.id),
             task_scan_acast_ads.si(episode.id, report.id).set(queue=transcription_queue),
             task_edit.si(episode.id, report.id),
         )
+    elif clip_mode == ClipMode.BBC:
+        pipeline = chain(
+            task_download.si(episode.id, report.id),
+            task_trim_scan.si(episode.id, report.id).set(queue=transcription_queue),
+            task_edit.si(episode.id, report.id),
+        )
     else:
         assert clip_mode == ClipMode.AI, f"Unexpected clip_mode: {clip_mode}"
-        transcription_queue = _get_transcription_queue(session)
         # NOTE: task_refine_boundaries is intentionally NOT wired into this chain
         # — boundary refinement is gated on offline eval results before being
         # enabled in production. The task and its shared helper remain available

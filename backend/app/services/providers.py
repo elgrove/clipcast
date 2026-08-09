@@ -63,6 +63,17 @@ class AdBreaksResponse(PydanticBaseModel):
     breaks: list[_AdBreakOut] = []
 
 
+class TrimResponse(PydanticBaseModel):
+    """Structured output for the BBC trim scan: where show content starts within
+    the head window and ends within the tail window (window-relative seconds),
+    plus short labels naming what is being cut at each end."""
+
+    content_start_s: float
+    content_end_s: float
+    head_reason: str = ""
+    tail_reason: str = ""
+
+
 def _response_to_ad_breaks(response: AdBreaksResponse) -> list[AdBreak]:
     return [
         AdBreak(
@@ -112,6 +123,11 @@ class AIProviderBase(ABC):
         notes that the block is one window of a longer episode. Timestamps are
         returned as given in the transcript — for a sub-window the caller offsets
         them back to absolute episode time."""
+
+    def analyse_trim(self, prompt: str, report: AnalysisReport = None) -> TrimResponse:
+        """Run the BBC trim prompt (already fully formatted by the caller) and
+        return the structured content boundaries."""
+        raise NotImplementedError(f"{type(self).__name__} does not support trim analysis")
 
     def calculate_cost(self, input_tokens, output_tokens, model_config: AIModel):
         input_cost = (
@@ -196,7 +212,13 @@ class GeminiProvider(AIProviderBase):
             prompt += f"\n\nAdditional instructions:\n{custom_instructions}"
         return self._run_analysis(prompt, report)
 
+    def analyse_trim(self, prompt: str, report: AnalysisReport = None) -> TrimResponse:
+        return self._run_structured(prompt, TrimResponse, report)
+
     def _run_analysis(self, prompt: str, report: AnalysisReport | None) -> list[AdBreak]:
+        return _response_to_ad_breaks(self._run_structured(prompt, AdBreaksResponse, report))
+
+    def _run_structured(self, prompt: str, schema: type, report: AnalysisReport | None):
         logger.info("Analysing with Gemini model %s", self.model_config.name)
 
         client = genai.Client(
@@ -209,7 +231,7 @@ class GeminiProvider(AIProviderBase):
             contents=[prompt],
             config=types.GenerateContentConfig(
                 response_mime_type="application/json",
-                response_schema=AdBreaksResponse,
+                response_schema=schema,
             ),
         )
 
@@ -222,8 +244,7 @@ class GeminiProvider(AIProviderBase):
             report.cost_usd = self.calculate_cost(input_tokens, output_tokens, self.model_config)
 
         text = self._strip_code_fences(response.text)
-        parsed = AdBreaksResponse.model_validate(json.loads(text))
-        return _response_to_ad_breaks(parsed)
+        return schema.model_validate(json.loads(text))
 
     def refine_boundary(
         self,
@@ -425,7 +446,13 @@ class OpenAICompatibleProvider(AIProviderBase):
             prompt += f"\n\nAdditional instructions:\n{custom_instructions}"
         return self._run_analysis(prompt, report)
 
+    def analyse_trim(self, prompt: str, report: AnalysisReport = None) -> TrimResponse:
+        return self._run_structured(prompt, TrimResponse, report)
+
     def _run_analysis(self, prompt: str, report: AnalysisReport | None) -> list[AdBreak]:
+        return _response_to_ad_breaks(self._run_structured(prompt, AdBreaksResponse, report))
+
+    def _run_structured(self, prompt: str, schema: type, report: AnalysisReport | None):
         logger.info(
             "Analysing with %s model %s",
             type(self).__name__,
@@ -435,7 +462,7 @@ class OpenAICompatibleProvider(AIProviderBase):
         completion = self._client().beta.chat.completions.parse(
             model=self.model_config.name,
             messages=[{"role": "user", "content": prompt}],
-            response_format=AdBreaksResponse,
+            response_format=schema,
             extra_headers=self.default_headers or None,
             timeout=ANALYSIS_TIMEOUT,
             **self._extra_request_kwargs(),
@@ -457,8 +484,8 @@ class OpenAICompatibleProvider(AIProviderBase):
         parsed = completion.choices[0].message.parsed
         if parsed is None:
             content = completion.choices[0].message.content or ""
-            parsed = AdBreaksResponse.model_validate_json(content)
-        return _response_to_ad_breaks(parsed)
+            parsed = schema.model_validate_json(content)
+        return parsed
 
     # ── override points ─────────────────────────────────────────────────────────
 

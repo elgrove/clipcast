@@ -70,6 +70,58 @@ ADS_CONTEXT_CONFIRMED_BREAK = (
 )
 
 
+TRIM_BBC_PROMPT = """You analyse BBC podcast transcripts to find where an episode's actual \
+show content starts and ends, so the BBC's wrapper audio can be trimmed off. BBC podcasts \
+carry no third-party adverts, but episodes are wrapped in non-show audio at the head and tail.
+
+You are given two timestamped transcript windows from one episode, plus the episode's title \
+and description:
+- HEAD: the first {head_window_s:.0f} seconds of the file. Timestamps are seconds from the \
+start of the file.
+- TAIL: the last {tail_window_s:.0f} seconds of the file, which begins {tail_offset_s:.1f} \
+seconds into the episode. Timestamps are seconds from the start of the TAIL window itself, \
+NOT from the start of the file.
+
+CUT (this is not show content):
+- BBC Sounds ident/jingle ("BBC Sounds, music, radio, podcasts")
+- Podcast preamble ("Thanks for downloading this episode...", "There's a reading list...")
+- Continuity announcer ("Now on BBC Radio 4...", "...here's X with Y", announcer intros for \
+special series)
+- News bulletin fragments from the preceding broadcast
+- Trailers for OTHER BBC programmes — the signal is a new voice saying "Hi, I'm X...", \
+"BBC Radio 4 presents...", "To subscribe, just search for..." or similar. If a trailer is \
+present, the content end must be BEFORE the trailer starts, never inside it.
+- Producer credits ("X is produced by...")
+- BBC Sounds app / subscribe promos ("download the free BBC Sounds app", "bbc.co.uk/sounds")
+
+KEEP (this is show content):
+- The host's cold open or "Hello" — content starts at the first word of the show itself
+- The host's signoff, thanks to guests, and next-episode preview
+- Post-signoff bonus discussion (e.g. a producer interrupting with "tea or coffee?" followed \
+by substantive extra conversation about the episode topic). This is part of the show — \
+content ends AFTER it, just before any trailer or credit. But if the exchange has no \
+substantive discussion after it (just "tea please" and then a trailer), cut it too.
+
+Return:
+- content_start_s: seconds into the HEAD window of the first word of show content. 0 if the \
+show starts immediately with no wrapper audio.
+- content_end_s: seconds into the TAIL window at which show content ends — the END of the \
+last in-show line, just before any trailer, credit, or promo. {tail_window_s:.0f} (the full \
+window) if the episode ends with show content and there is nothing to trim.
+- head_reason / tail_reason: a few words naming what is being cut at each end (e.g. \
+"BBC Sounds ident + continuity intro", "trailer for Intrigue + Sounds promo"). Empty string \
+if nothing is cut at that end.
+
+Episode title: {title}
+Episode description: {description}
+
+HEAD transcript:
+{head_transcript}
+
+TAIL transcript:
+{tail_transcript}"""
+
+
 REFINE_AD_START_PROMPT = """You are listening to a short audio clip from a podcast.
 
 Somewhere in this clip, regular podcast content transitions into an advertisement. Your
