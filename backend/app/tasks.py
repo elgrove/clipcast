@@ -873,7 +873,10 @@ def task_trim_scan(self, episode_id: str, report_id: str) -> None:
         if not episode:
             raise ValueError(f"Episode not found: {episode_id}")
 
-        if episode.ad_breaks:
+        # analysed_at (not ad_breaks) is the done-marker: an empty trim result
+        # is a legitimate outcome and must not trigger a re-scan on redelivery.
+        report = session.get(ClippingReport, report_id)
+        if (report and report.analysed_at) or episode.ad_breaks:
             _log_report(report_id, "Trim scan already done, skipping")
             return
 
@@ -968,20 +971,26 @@ def task_trim_scan(self, episode_id: str, report_id: str) -> None:
         )
         trim = analyse_provider.analyse_trim(prompt, analysis_report)
 
+        content_end_rel_s = bbc.clamp_tail_end(trim.content_end_s, tail_len_s)
         failure = bbc.validate_trim(
-            trim.content_start_s, trim.content_end_s, head_len_s, tail_len_s, tail_offset_s
+            trim.content_start_s, content_end_rel_s, head_len_s, tail_len_s, tail_offset_s
         )
         if failure is None:
             content_start_s = trim.content_start_s
-            content_end_s = tail_offset_s + trim.content_end_s
+            content_end_s = tail_offset_s + content_end_rel_s
             # Snap each boundary only when it will actually produce a cut — a
             # boundary at the window edge means "nothing to trim" and must not
             # be dragged to a nearby silence.
             if content_start_s >= bbc.MIN_TRIM_S:
                 content_start_s = bbc.snap_head_cut(bbc.detect_silences(head_path), content_start_s)
             if duration_s - content_end_s >= bbc.MIN_TRIM_S:
-                snapped_rel = bbc.snap_tail_cut(bbc.detect_silences(tail_path), trim.content_end_s)
+                snapped_rel = bbc.snap_tail_cut(bbc.detect_silences(tail_path), content_end_rel_s)
                 content_end_s = tail_offset_s + snapped_rel
+            if content_end_s <= content_start_s:
+                # Snapping inverted a near-degenerate span — fall back to the
+                # unsnapped boundaries rather than cutting the whole episode.
+                content_start_s = trim.content_start_s
+                content_end_s = tail_offset_s + content_end_rel_s
             breaks = bbc.trim_to_breaks(
                 content_start_s, content_end_s, duration_s, trim.head_reason, trim.tail_reason
             )

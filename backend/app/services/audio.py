@@ -15,8 +15,11 @@ import numpy as np
 
 logger = logging.getLogger(__name__)
 
-_SILENCE_START_RE = re.compile(r"silence_start:\s*([\d.]+)")
-_SILENCE_END_RE = re.compile(r"silence_end:\s*([\d.]+)\s+\|\s+silence_duration:\s*([\d.]+)")
+# silencedetect emits slightly negative starts at the head of a file (decoder
+# delay compensation), so the sign must be matched or the positional
+# start/duration pairing below shifts.
+_SILENCE_START_RE = re.compile(r"silence_start:\s*(-?[\d.]+)")
+_SILENCE_END_RE = re.compile(r"silence_end:\s*(-?[\d.]+)\s+\|\s+silence_duration:\s*([\d.]+)")
 
 
 def _run(args: list[str]) -> subprocess.CompletedProcess:
@@ -105,7 +108,10 @@ def detect_silences(
         text=True,
         errors="replace",
     )
-    starts = [float(m.group(1)) for m in _SILENCE_START_RE.finditer(result.stderr)]
+    if result.returncode != 0:
+        stderr = result.stderr.strip().splitlines()
+        raise RuntimeError(f"ffmpeg failed: {stderr[-1] if stderr else result.returncode}")
+    starts = [max(0.0, float(m.group(1))) for m in _SILENCE_START_RE.finditer(result.stderr)]
     durations = [float(m.group(2)) for m in _SILENCE_END_RE.finditer(result.stderr)]
     return [(s, durations[i] if i < len(durations) else 0.0) for i, s in enumerate(starts)]
 

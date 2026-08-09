@@ -1,5 +1,9 @@
+import subprocess
+
+from app.services import audio
 from app.services.bbc import (
     bbc_feed_url_heuristic,
+    clamp_tail_end,
     snap_head_cut,
     snap_tail_cut,
     trim_to_breaks,
@@ -64,6 +68,54 @@ def test_validate_trim_rejects_end_outside_tail_window():
 def test_validate_trim_rejects_end_before_start():
     # Short episode: windows overlap and the model inverted the boundaries.
     assert validate_trim(100.0, 20.0, 240.0, 480.0, 0.0) is not None
+
+
+def test_clamp_tail_end():
+    # Model returns the whole-second-rendered window length on a short episode.
+    assert clamp_tail_end(436.0, 435.7) == 435.7
+    assert clamp_tail_end(400.0, 435.7) == 400.0
+    assert clamp_tail_end(437.0, 435.7) == 437.0  # beyond tolerance: left for validation
+
+
+# ── silencedetect parsing ────────────────────────────────────────────────────
+
+
+def _fake_silencedetect(stderr: str, returncode: int = 0):
+    def run(*args, **kwargs):
+        return subprocess.CompletedProcess(
+            args=args, returncode=returncode, stdout="", stderr=stderr
+        )
+
+    return run
+
+
+def test_detect_silences_parses_negative_start(monkeypatch, tmp_path):
+    stderr = (
+        "[silencedetect @ 0x1] silence_start: -0.023021\n"
+        "[silencedetect @ 0x1] silence_end: 1.5 | silence_duration: 1.523\n"
+        "[silencedetect @ 0x1] silence_start: 14.5\n"
+        "[silencedetect @ 0x1] silence_end: 15.0 | silence_duration: 0.5\n"
+    )
+    monkeypatch.setattr("app.services.audio.subprocess.run", _fake_silencedetect(stderr))
+    silences = audio.detect_silences(tmp_path / "x.mp3", -35, 0.1)
+    assert silences == [(0.0, 1.523), (14.5, 0.5)]
+
+
+def test_detect_silences_trailing_open_silence(monkeypatch, tmp_path):
+    stderr = "[silencedetect @ 0x1] silence_start: 200.0\n"
+    monkeypatch.setattr("app.services.audio.subprocess.run", _fake_silencedetect(stderr))
+    assert audio.detect_silences(tmp_path / "x.mp3", -35, 0.1) == [(200.0, 0.0)]
+
+
+def test_detect_silences_raises_on_ffmpeg_failure(monkeypatch, tmp_path):
+    monkeypatch.setattr(
+        "app.services.audio.subprocess.run", _fake_silencedetect("boom", returncode=1)
+    )
+    try:
+        audio.detect_silences(tmp_path / "x.mp3", -35, 0.1)
+        raise AssertionError("expected RuntimeError")
+    except RuntimeError as e:
+        assert "ffmpeg failed" in str(e)
 
 
 # ── silence snapping ─────────────────────────────────────────────────────────

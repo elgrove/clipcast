@@ -1,8 +1,7 @@
 """BBC trim pipeline: detect where show content starts and ends in a BBC
 podcast episode and cut the wrapper audio (Sounds idents, continuity,
-trailers, credits) outside it. Generalised from the In Our Time cleaning
-pipeline (~/dev/iotc); the silence-snap constants are its battle-tested
-values."""
+trailers, credits) outside it. The silence-snap constants are tuned for BBC
+speech-radio audio."""
 
 from pathlib import Path
 from urllib.parse import urlparse
@@ -24,6 +23,12 @@ SILENCE_THRESHOLD_DB = -35
 SILENCE_MIN_DURATION_S = 0.10
 HEAD_SNAP_FORWARD_MAX_S = 1.5  # past the fragment, before the host's inhale
 TAIL_SNAP_FORWARD_MAX_S = 3.0  # end of the host's last word + trailing breath
+
+# The prompt tells the model to return the full (whole-second-rendered) window
+# length when there is nothing to trim at the tail, so on episodes shorter than
+# the tail window the answer can overshoot the fractional window length by up
+# to a second. Overshoot within this tolerance means "no tail trim".
+TAIL_END_TOLERANCE_S = 1.0
 
 
 def bbc_feed_url_heuristic(feed_url: str) -> bool:
@@ -57,6 +62,12 @@ def build_trim_prompt(
         tail_window_s=tail_window_s,
         tail_offset_s=tail_offset_s,
     )
+
+
+def clamp_tail_end(content_end_s: float, tail_window_len_s: float) -> float:
+    if tail_window_len_s < content_end_s <= tail_window_len_s + TAIL_END_TOLERANCE_S:
+        return tail_window_len_s
+    return content_end_s
 
 
 def validate_trim(
