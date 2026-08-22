@@ -7,12 +7,19 @@ OS once glibc has grown its heap for it."""
 
 import json
 import logging
+import re
 import subprocess
 from pathlib import Path
 
 import numpy as np
 
 logger = logging.getLogger(__name__)
+
+# silencedetect emits slightly negative starts at the head of a file (decoder
+# delay compensation), so the sign must be matched or the positional
+# start/duration pairing below shifts.
+_SILENCE_START_RE = re.compile(r"silence_start:\s*(-?[\d.]+)")
+_SILENCE_END_RE = re.compile(r"silence_end:\s*(-?[\d.]+)\s+\|\s+silence_duration:\s*([\d.]+)")
 
 
 def _run(args: list[str]) -> subprocess.CompletedProcess:
@@ -75,6 +82,38 @@ def decode_mono(path: Path, sample_rate: int) -> np.ndarray:
     )
     samples = np.frombuffer(result.stdout, dtype=np.int16)
     return samples.astype(np.float32) / 32768.0
+
+
+def detect_silences(
+    path: Path, threshold_db: float, min_duration_s: float
+) -> list[tuple[float, float]]:
+    """Return (onset_seconds, duration_seconds) for every silence in the file,
+    via ffmpeg's silencedetect filter. A trailing silence still open at EOF is
+    reported with duration 0."""
+    result = subprocess.run(
+        [
+            "ffmpeg",
+            "-nostdin",
+            "-v",
+            "info",
+            "-i",
+            str(path),
+            "-af",
+            f"silencedetect=noise={threshold_db}dB:duration={min_duration_s}",
+            "-f",
+            "null",
+            "-",
+        ],
+        capture_output=True,
+        text=True,
+        errors="replace",
+    )
+    if result.returncode != 0:
+        stderr = result.stderr.strip().splitlines()
+        raise RuntimeError(f"ffmpeg failed: {stderr[-1] if stderr else result.returncode}")
+    starts = [max(0.0, float(m.group(1))) for m in _SILENCE_START_RE.finditer(result.stderr)]
+    durations = [float(m.group(2)) for m in _SILENCE_END_RE.finditer(result.stderr)]
+    return [(s, durations[i] if i < len(durations) else 0.0) for i, s in enumerate(starts)]
 
 
 def extract_window(source: Path, start_ms: int, end_ms: int, dest: Path) -> None:

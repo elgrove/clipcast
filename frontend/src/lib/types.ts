@@ -5,7 +5,7 @@ export interface PodcastShow {
 	description: string;
 	itunes_id: string;
 	source_rss_url: string;
-	clip_mode: 'off' | 'ai' | 'acast';
+	clip_mode: 'off' | 'ai' | 'acast' | 'bbc';
 	initial_sync_completed: boolean;
 	episode_count: number;
 	image_url: string | null;
@@ -173,6 +173,7 @@ export interface ITunesSearchResult {
 	genre: string;
 	episode_count: number | null;
 	ads_by_acast: boolean;
+	is_bbc: boolean;
 }
 
 export interface BugReportInput {

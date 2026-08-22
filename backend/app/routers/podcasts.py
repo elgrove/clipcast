@@ -14,7 +14,7 @@ from app.models import (
     PodcastShowRead,
     PodcastShowUpdate,
 )
-from app.services.rss import lookup_itunes
+from app.services.rss import default_clip_mode, lookup_itunes
 from app.tasks import sync_and_process_new_episodes, sync_podcast_episodes, sync_podcast_show
 
 logger = logging.getLogger("clipcast")
@@ -64,10 +64,11 @@ def add_podcast(data: PodcastShowCreate, session: Session = Depends(get_session)
     if not podcast_info:
         raise HTTPException(status_code=404, detail="Podcast not found on iTunes")
 
-    # Auto-upgrade to acast mode if the feed is on feeds.acast.com and client sent default
+    # Auto-upgrade to acast/bbc mode from the feed-URL heuristics when the
+    # client sent the default
     clip_mode = data.clip_mode
-    if clip_mode == ClipMode.AI and podcast_info.ads_by_acast:
-        clip_mode = ClipMode.ACAST
+    if clip_mode == ClipMode.AI:
+        clip_mode = default_clip_mode(podcast_info)
 
     podcast = PodcastShow(
         itunes_id=data.itunes_id,

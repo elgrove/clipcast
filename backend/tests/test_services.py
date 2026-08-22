@@ -323,6 +323,21 @@ def test_queue_acast_chain_tasks(session, monkeypatch):
     ], f"Got: {captured}"
 
 
+def test_queue_bbc_chain_tasks(session, monkeypatch):
+    captured = _mock_chain(monkeypatch)
+    episode = _make_podcast_and_episode(session, "bbc")
+
+    from app.tasks import queue_episode_for_clipping
+
+    queue_episode_for_clipping(session, episode)
+
+    assert captured == [
+        "app.tasks.task_download",
+        "app.tasks.task_trim_scan",
+        "app.tasks.task_edit",
+    ], f"Got: {captured}"
+
+
 def test_queue_ai_chain_tasks(session, monkeypatch):
     captured = _mock_chain(monkeypatch)
     episode = _make_podcast_and_episode(session, "ai")

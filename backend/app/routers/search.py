@@ -18,6 +18,7 @@ def itunes_search(q: str = Query(..., min_length=1)):
             artwork_url=r.artwork_url,
             genre=r.genre,
             ads_by_acast=r.ads_by_acast,
+            is_bbc=r.is_bbc,
         )
         for r in results
     ]

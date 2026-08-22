@@ -7,8 +7,9 @@ import requests
 from pydantic import BaseModel as PydanticBaseModel
 from sqlmodel import Session, select
 
-from app.models import PodcastEpisode, PodcastShow
+from app.models import ClipMode, PodcastEpisode, PodcastShow
 from app.services.acast import acast_feed_url_heuristic
+from app.services.bbc import bbc_feed_url_heuristic
 
 logger = logging.getLogger(__name__)
 
@@ -24,6 +25,7 @@ class ITunesPodcast(PydanticBaseModel):
     artwork_url: str
     genre: str
     ads_by_acast: bool = False
+    is_bbc: bool = False
 
 
 class RSSEpisode(PydanticBaseModel):
@@ -69,6 +71,7 @@ def search_itunes(term: str, limit: int = 25) -> list[ITunesPodcast]:
                 artwork_url=item.get("artworkUrl600", item.get("artworkUrl100", "")),
                 genre=item.get("primaryGenreName", ""),
                 ads_by_acast=acast_feed_url_heuristic(feed_url),
+                is_bbc=bbc_feed_url_heuristic(feed_url),
             )
         )
     return results
@@ -97,7 +100,16 @@ def lookup_itunes(itunes_id: str) -> ITunesPodcast | None:
         artwork_url=item.get("artworkUrl600", item.get("artworkUrl100", "")),
         genre=item.get("primaryGenreName", ""),
         ads_by_acast=acast_feed_url_heuristic(feed_url),
+        is_bbc=bbc_feed_url_heuristic(feed_url),
     )
+
+
+def default_clip_mode(podcast_info: ITunesPodcast) -> ClipMode:
+    if podcast_info.ads_by_acast:
+        return ClipMode.ACAST
+    if podcast_info.is_bbc:
+        return ClipMode.BBC
+    return ClipMode.AI
 
 
 def _parse_duration(duration_str: str | None) -> int | None:
@@ -221,14 +233,12 @@ def sync_podcast_from_itunes(session: Session, itunes_id: str) -> PodcastShow:
         podcast.title = podcast_info.title
         podcast.source_rss_url = podcast_info.feed_url
     else:
-        from app.models import ClipMode
-
         podcast = PodcastShow(
             itunes_id=itunes_id,
             title=podcast_info.title,
             source_rss_url=podcast_info.feed_url,
             path_directory=PodcastShow.generate_directory_name(podcast_info.title),
-            clip_mode=ClipMode.ACAST if podcast_info.ads_by_acast else ClipMode.AI,
+            clip_mode=default_clip_mode(podcast_info),
         )
 
     session.add(podcast)

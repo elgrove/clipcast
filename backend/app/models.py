@@ -105,6 +105,7 @@ class ClipMode(StrEnum):
     OFF = "off"
     AI = "ai"
     ACAST = "acast"
+    BBC = "bbc"
 
 
 class Provider(StrEnum):
@@ -668,6 +669,7 @@ class ITunesSearchResult(PydanticBaseModel):
     genre: str
     episode_count: int | None = None
     ads_by_acast: bool = False
+    is_bbc: bool = False
 
 
 class BugReportCreate(PydanticBaseModel):
