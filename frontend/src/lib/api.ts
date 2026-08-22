@@ -57,10 +57,17 @@ export async function getPodcast(id: string): Promise<PodcastShow> {
 	return fetchApi<PodcastShow>(`/api/podcasts/${id}`);
 }
 
-export async function addPodcast(itunesId: string, clipMode: string): Promise<PodcastShow> {
+export async function addPodcast(
+	podcast: { itunes_id: string; feed_url: string },
+	clipMode: string
+): Promise<PodcastShow> {
 	return fetchApi<PodcastShow>('/api/podcasts', {
 		method: 'POST',
-		body: JSON.stringify({ itunes_id: itunesId, clip_mode: clipMode })
+		body: JSON.stringify(
+			podcast.itunes_id
+				? { itunes_id: podcast.itunes_id, clip_mode: clipMode }
+				: { feed_url: podcast.feed_url, clip_mode: clipMode }
+		)
 	});
 }
 

@@ -39,7 +39,7 @@
 		if (!selectedPodcast) return;
 		adding = true;
 		try {
-			const podcast = await addPodcast(selectedPodcast.itunes_id, checkForAds ? 'ai' : 'off');
+			const podcast = await addPodcast(selectedPodcast, checkForAds ? 'ai' : 'off');
 			toasts.addToast('success', `Added "${podcast.title}" to library`);
 			goto(`/podcast/${podcast.id}`);
 		} catch (e: any) {
@@ -53,7 +53,7 @@
 <div class="space-y-5">
 	<div>
 		<h1 class="text-2xl font-bold text-zinc-900 dark:text-white">Add Podcast</h1>
-		<p class="mt-1 text-sm text-zinc-500 dark:text-zinc-400">Search the iTunes catalogue to find podcasts</p>
+		<p class="mt-1 text-sm text-zinc-500 dark:text-zinc-400">Search the iTunes catalogue, or paste an RSS feed URL</p>
 	</div>
 
 	<div class="relative">
@@ -63,7 +63,7 @@
 		<input
 			type="text"
 			bind:value={query}
-			placeholder="Search for a podcast..."
+			placeholder="Search for a podcast, or paste an RSS feed URL..."
 			class="h-12 w-full rounded-xl border border-zinc-300 bg-white py-3 pl-10 pr-4 text-base outline-none transition-colors focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20 sm:h-auto sm:text-sm dark:border-zinc-700 dark:bg-zinc-900 dark:text-white dark:placeholder-zinc-500 dark:focus:border-emerald-500"
 		/>
 		{#if searching}
@@ -75,13 +75,17 @@
 
 	{#if searched && results.length === 0 && !searching}
 		<div class="flex flex-col items-center py-12">
-			<p class="text-sm text-zinc-500 dark:text-zinc-400">No results found for "{query}"</p>
+			<p class="text-sm text-zinc-500 dark:text-zinc-400">
+				{query.trim().startsWith('http')
+					? "Couldn't read a podcast feed at that URL"
+					: `No results found for "${query}"`}
+			</p>
 		</div>
 	{/if}
 
 	{#if results.length > 0}
 		<div class="grid grid-cols-2 gap-3 sm:gap-4 md:grid-cols-3 lg:grid-cols-4">
-			{#each results as result (result.itunes_id)}
+			{#each results as result (result.feed_url)}
 				<button
 					onclick={() => {
 						selectedPodcast = result;

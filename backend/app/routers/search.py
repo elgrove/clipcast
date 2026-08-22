@@ -1,14 +1,20 @@
 from fastapi import APIRouter, Query
 
 from app.models import ITunesSearchResult
-from app.services.rss import search_itunes
+from app.services.rss import podcast_from_feed_url, search_itunes
 
 router = APIRouter(prefix="/api/search", tags=["search"])
 
 
 @router.get("/itunes", response_model=list[ITunesSearchResult])
 def itunes_search(q: str = Query(..., min_length=1)):
-    results = search_itunes(q)
+    term = q.strip()
+    if term.startswith(("http://", "https://")):
+        feed_podcast = podcast_from_feed_url(term)
+        results = [feed_podcast] if feed_podcast else []
+    else:
+        results = search_itunes(term)
+
     return [
         ITunesSearchResult(
             itunes_id=r.itunes_id,

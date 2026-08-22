@@ -3,7 +3,7 @@ import shutil
 
 import requests
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlmodel import Session, func, select
+from sqlmodel import Session, func, or_, select
 
 from app.database import get_session
 from app.models import (
@@ -14,7 +14,7 @@ from app.models import (
     PodcastShowRead,
     PodcastShowUpdate,
 )
-from app.services.rss import default_clip_mode, lookup_itunes
+from app.services.rss import default_clip_mode, feed_url_id, lookup_itunes, podcast_from_feed_url
 from app.tasks import sync_and_process_new_episodes, sync_podcast_episodes, sync_podcast_show
 
 logger = logging.getLogger("clipcast")
@@ -54,15 +54,27 @@ def list_podcasts(session: Session = Depends(get_session)):
 
 @router.post("", response_model=PodcastShowRead, status_code=201)
 def add_podcast(data: PodcastShowCreate, session: Session = Depends(get_session)):
+    if data.feed_url:
+        podcast_info = podcast_from_feed_url(data.feed_url)
+        if not podcast_info:
+            raise HTTPException(status_code=400, detail="Could not read that RSS feed")
+        itunes_id = feed_url_id(data.feed_url)
+    else:
+        podcast_info = lookup_itunes(data.itunes_id)
+        if not podcast_info:
+            raise HTTPException(status_code=404, detail="Podcast not found on iTunes")
+        itunes_id = data.itunes_id
+
     existing = session.exec(
-        select(PodcastShow).where(PodcastShow.itunes_id == data.itunes_id)
+        select(PodcastShow).where(
+            or_(
+                PodcastShow.itunes_id == itunes_id,
+                PodcastShow.source_rss_url == podcast_info.feed_url,
+            )
+        )
     ).first()
     if existing:
         raise HTTPException(status_code=409, detail="Podcast already in library")
-
-    podcast_info = lookup_itunes(data.itunes_id)
-    if not podcast_info:
-        raise HTTPException(status_code=404, detail="Podcast not found on iTunes")
 
     # Auto-upgrade to acast/bbc mode from the feed-URL heuristics when the
     # client sent the default
@@ -71,7 +83,7 @@ def add_podcast(data: PodcastShowCreate, session: Session = Depends(get_session)
         clip_mode = default_clip_mode(podcast_info)
 
     podcast = PodcastShow(
-        itunes_id=data.itunes_id,
+        itunes_id=itunes_id,
         title=podcast_info.title,
         source_rss_url=podcast_info.feed_url,
         path_directory=PodcastShow.generate_directory_name(podcast_info.title),

@@ -511,7 +511,8 @@ class PodcastEpisodeRead(PydanticBaseModel):
 
 
 class PodcastShowCreate(PydanticBaseModel):
-    itunes_id: str
+    itunes_id: str = ""
+    feed_url: str = ""
     clip_mode: str = ClipMode.AI
 
 

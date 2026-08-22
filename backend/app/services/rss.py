@@ -1,3 +1,4 @@
+import hashlib
 import logging
 from datetime import datetime
 from email.utils import parsedate_to_datetime
@@ -42,6 +43,7 @@ class RSSPodcast(PydanticBaseModel):
     title: str
     description: str
     artwork_url: str | None
+    author: str = ""
     episodes: list[RSSEpisode]
 
 
@@ -218,7 +220,34 @@ def parse_rss_feed(feed_url: str) -> RSSPodcast:
         title=feed.feed.get("title", ""),
         description=feed.feed.get("description", feed.feed.get("subtitle", "")),
         artwork_url=_get_artwork_url(feed.feed),
+        author=feed.feed.get("author", ""),
         episodes=episodes,
+    )
+
+
+def feed_url_id(feed_url: str) -> str:
+    return f"rss-{hashlib.sha1(feed_url.encode()).hexdigest()[:16]}"
+
+
+def podcast_from_feed_url(feed_url: str) -> ITunesPodcast | None:
+    try:
+        rss_data = parse_rss_feed(feed_url)
+    except Exception as e:
+        logger.warning("Failed to read feed %s: %s", feed_url, e)
+        return None
+
+    if not rss_data.title:
+        return None
+
+    return ITunesPodcast(
+        itunes_id="",
+        title=rss_data.title,
+        artist=rss_data.author,
+        feed_url=feed_url,
+        artwork_url=rss_data.artwork_url or "",
+        genre="",
+        ads_by_acast=acast_feed_url_heuristic(feed_url),
+        is_bbc=bbc_feed_url_heuristic(feed_url),
     )
 
 
