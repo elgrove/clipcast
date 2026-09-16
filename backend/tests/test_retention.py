@@ -1,8 +1,63 @@
 from datetime import datetime, timedelta
 
+import responses
 from sqlmodel import select
 
 from app.models import ClippingReport, ClipSource, PodcastEpisode, PodcastShow
+from app.tasks import _cleanup_podcast_episodes
+
+
+def _itunes_result(collection_id=123456, feed_url="https://example.com/feed.xml"):
+    return {
+        "resultCount": 1,
+        "results": [
+            {
+                "collectionId": collection_id,
+                "collectionName": "Test Podcast",
+                "artistName": "Test Artist",
+                "feedUrl": feed_url,
+                "artworkUrl600": "https://example.com/image.jpg",
+                "primaryGenreName": "Technology",
+            }
+        ],
+    }
+
+
+@responses.activate
+def test_add_podcast_defaults_to_mixed(client):
+    responses.add(
+        responses.GET,
+        "https://itunes.apple.com/lookup",
+        json=_itunes_result(901),
+    )
+    response = client.post("/api/podcasts", json={"itunes_id": "901"})
+    assert response.status_code == 201
+    data = response.json()
+    assert data["keep_manual_clips"] is True
+    assert data["cleanup_keep_count"] == 5
+    assert data["cleanup_keep_days"] is None
+
+
+@responses.activate
+def test_add_podcast_archive_disables_cleanup(client):
+    responses.add(
+        responses.GET,
+        "https://itunes.apple.com/lookup",
+        json=_itunes_result(902),
+    )
+    response = client.post(
+        "/api/podcasts",
+        json={
+            "itunes_id": "902",
+            "cleanup_keep_count": None,
+            "cleanup_keep_days": None,
+            "keep_manual_clips": True,
+        },
+    )
+    assert response.status_code == 201
+    data = response.json()
+    assert data["cleanup_keep_count"] is None
+    assert data["cleanup_keep_days"] is None
 
 
 def _make_podcast(
@@ -47,8 +102,6 @@ def _make_episode(session, podcast, idx, clip_source, days_old):
 
 
 def test_mixed_preserves_manual_and_keeps_newest_automatic(session):
-    from app.tasks import _cleanup_podcast_episodes
-
     podcast = _make_podcast(session, keep_count=2, keep_manual=True)
     # 2 manual (oldest and newest) + 3 automatic
     _make_episode(session, podcast, 1, ClipSource.AUTOMATIC, days_old=10)
@@ -74,8 +127,6 @@ def test_mixed_preserves_manual_and_keeps_newest_automatic(session):
 
 
 def test_mixed_manual_does_not_consume_slot(session):
-    from app.tasks import _cleanup_podcast_episodes
-
     podcast = _make_podcast(session, title="Mixed Slots", keep_count=2, keep_manual=True)
     # Newest episode overall is manual — it must not consume an automatic slot.
     _make_episode(session, podcast, 1, ClipSource.AUTOMATIC, days_old=5)
@@ -96,8 +147,6 @@ def test_mixed_manual_does_not_consume_slot(session):
 
 
 def test_live_includes_manual_in_retention(session):
-    from app.tasks import _cleanup_podcast_episodes
-
     podcast = _make_podcast(session, title="Live Show", keep_count=2, keep_manual=False)
     _make_episode(session, podcast, 1, ClipSource.AUTOMATIC, days_old=10)
     _make_episode(session, podcast, 2, ClipSource.MANUAL, days_old=9)
@@ -116,8 +165,6 @@ def test_live_includes_manual_in_retention(session):
 
 
 def test_archive_removes_nothing(session):
-    from app.tasks import _cleanup_podcast_episodes
-
     podcast = _make_podcast(
         session, title="Archive Show", keep_count=None, keep_days=None, keep_manual=True
     )
@@ -128,8 +175,6 @@ def test_archive_removes_nothing(session):
 
 
 def test_count_and_days_combine_with_or(session):
-    from app.tasks import _cleanup_podcast_episodes
-
     podcast = _make_podcast(
         session,
         title="Or Rules",

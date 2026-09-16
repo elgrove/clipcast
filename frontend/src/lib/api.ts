@@ -66,24 +66,20 @@ export async function addPodcast(
 		keep_manual_clips?: boolean;
 	}
 ): Promise<PodcastShow> {
+	const retentionBody = {
+		cleanup_keep_days: retention?.cleanup_keep_days ?? null,
+		cleanup_keep_count:
+			retention?.cleanup_keep_count !== undefined
+				? retention.cleanup_keep_count
+				: 5,
+		keep_manual_clips: retention?.keep_manual_clips ?? true
+	};
 	return fetchApi<PodcastShow>('/api/podcasts', {
 		method: 'POST',
 		body: JSON.stringify(
 			podcast.itunes_id
-				? {
-						itunes_id: podcast.itunes_id,
-						clip_mode: clipMode,
-						cleanup_keep_days: retention?.cleanup_keep_days ?? null,
-						cleanup_keep_count: retention?.cleanup_keep_count ?? 5,
-						keep_manual_clips: retention?.keep_manual_clips ?? true
-					}
-				: {
-						feed_url: podcast.feed_url,
-						clip_mode: clipMode,
-						cleanup_keep_days: retention?.cleanup_keep_days ?? null,
-						cleanup_keep_count: retention?.cleanup_keep_count ?? 5,
-						keep_manual_clips: retention?.keep_manual_clips ?? true
-					}
+				? { itunes_id: podcast.itunes_id, clip_mode: clipMode, ...retentionBody }
+				: { feed_url: podcast.feed_url, clip_mode: clipMode, ...retentionBody }
 		)
 	});
 }

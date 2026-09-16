@@ -10,6 +10,7 @@ from collections.abc import Sequence
 
 import sqlalchemy as sa
 import sqlmodel
+from sqlalchemy import bindparam, text
 
 from alembic import op
 
@@ -71,9 +72,6 @@ def _apply_retention_profiles() -> None:
     Mixed keeps manual clips and the newest N automatic clips.
     Archive disables automatic cleanup entirely.
     """
-    from sqlalchemy import bindparam
-    from sqlalchemy import text
-
     conn = op.get_bind()
 
     # Live: manual clips are cleanup candidates. Preserve existing counts

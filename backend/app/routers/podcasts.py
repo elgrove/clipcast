@@ -83,17 +83,21 @@ def add_podcast(data: PodcastShowCreate, session: Session = Depends(get_session)
     if clip_mode == ClipMode.AI:
         clip_mode = default_clip_mode(podcast_info)
 
+    # New podcasts default to the Mixed profile via the PodcastShowCreate
+    # schema defaults (newest 5 automatic, keep manual clips). An explicit
+    # null count/days means Archive (cleanup disabled) and must be preserved.
+    # Non-positive values are treated as unset, matching the update path.
+    keep_count = data.cleanup_keep_count
+    keep_days = data.cleanup_keep_days
     podcast = PodcastShow(
         itunes_id=itunes_id,
         title=podcast_info.title,
         source_rss_url=podcast_info.feed_url,
         path_directory=PodcastShow.generate_directory_name(podcast_info.title),
         clip_mode=clip_mode,
-        # New podcasts default to the Mixed profile: keep manual clips and
-        # retain the newest 5 automatic clips.
-        cleanup_keep_days=data.cleanup_keep_days,
-        cleanup_keep_count=(data.cleanup_keep_count if data.cleanup_keep_count is not None else 5),
-        keep_manual_clips=(data.keep_manual_clips if data.keep_manual_clips is not None else True),
+        cleanup_keep_days=keep_days if keep_days is not None and keep_days > 0 else None,
+        cleanup_keep_count=keep_count if keep_count is not None and keep_count > 0 else None,
+        keep_manual_clips=data.keep_manual_clips if data.keep_manual_clips is not None else True,
     )
     podcast.directory.mkdir(parents=True, exist_ok=True)
 

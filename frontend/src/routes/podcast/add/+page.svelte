@@ -66,8 +66,8 @@
 		if (!selectedPodcast) return;
 		adding = true;
 		try {
-			const count = retentionCount ? parseInt(retentionCount) : null;
-			const days = retentionDays ? parseInt(retentionDays) : null;
+			const count = retentionCount ? parseInt(retentionCount, 10) : null;
+			const days = retentionDays ? parseInt(retentionDays, 10) : null;
 			const podcast = await addPodcast(selectedPodcast, checkForAds ? 'ai' : 'off', {
 				cleanup_keep_count: count,
 				cleanup_keep_days: days,

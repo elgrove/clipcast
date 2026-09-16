@@ -281,8 +281,8 @@
 		if (!podcast) return;
 		savingSettings = true;
 		try {
-			const days = cleanupKeepDays ? parseInt(cleanupKeepDays) : 0;
-			const count = cleanupKeepCount ? parseInt(cleanupKeepCount) : 0;
+			const days = cleanupKeepDays ? parseInt(cleanupKeepDays, 10) : 0;
+			const count = cleanupKeepCount ? parseInt(cleanupKeepCount, 10) : 0;
 			podcast = await updatePodcast(podcastId, {
 				clip_mode: settingsClipMode,
 				cleanup_keep_days: days,
