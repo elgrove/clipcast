@@ -43,8 +43,53 @@
 	let settingsClipMode = $state<'off' | 'ai' | 'acast' | 'bbc'>('ai');
 	let cleanupKeepDays: string = $state('');
 	let cleanupKeepCount: string = $state('');
+	let keepManualClips: boolean = $state(true);
+	let retentionProfile: 'live' | 'archive' | 'mixed' | 'custom' = $state('mixed');
 	let keepRawEpisodes: boolean = $state(false);
 	let customPrompt: string = $state('');
+
+	function deriveRetentionProfile(
+		days: string,
+		count: string,
+		keepManual: boolean
+	): 'live' | 'archive' | 'mixed' | 'custom' {
+		const hasRules = days !== '' || count !== '';
+		if (!hasRules) return 'archive';
+		if (!keepManual && count === '5' && days === '') return 'live';
+		if (keepManual && count === '5' && days === '') return 'mixed';
+		return 'custom';
+	}
+
+	function applyRetentionProfile(profile: 'live' | 'archive' | 'mixed') {
+		retentionProfile = profile;
+		if (profile === 'live') {
+			keepManualClips = false;
+			cleanupKeepCount = '5';
+			cleanupKeepDays = '';
+		} else if (profile === 'archive') {
+			cleanupKeepCount = '';
+			cleanupKeepDays = '';
+			keepManualClips = true;
+		} else {
+			keepManualClips = true;
+			cleanupKeepCount = '5';
+			cleanupKeepDays = '';
+		}
+	}
+
+	function markRetentionCustom() {
+		// Called on user edits; the displayed profile becomes Custom.
+		// Defer one tick so bound values update first.
+		setTimeout(() => {
+			retentionProfile = deriveRetentionProfile(
+				cleanupKeepDays,
+				cleanupKeepCount,
+				keepManualClips
+			);
+			// If the edited values happen to match a preset exactly, keep
+			// that preset label instead of forcing Custom.
+		}, 0);
+	}
 
 	let selectedIds: Set<string> = $state(new Set());
 	let downloadingIds: Set<string> = $state(new Set());
@@ -222,6 +267,12 @@
 		settingsClipMode = (podcast?.clip_mode ?? 'ai') as 'off' | 'ai' | 'acast' | 'bbc';
 		cleanupKeepDays = podcast?.cleanup_keep_days?.toString() ?? '';
 		cleanupKeepCount = podcast?.cleanup_keep_count?.toString() ?? '';
+		keepManualClips = podcast?.keep_manual_clips ?? true;
+		retentionProfile = deriveRetentionProfile(
+			cleanupKeepDays,
+			cleanupKeepCount,
+			keepManualClips
+		);
 		keepRawEpisodes = podcast?.keep_raw_episodes ?? false;
 		customPrompt = podcast?.custom_prompt ?? '';
 	}
@@ -236,6 +287,7 @@
 				clip_mode: settingsClipMode,
 				cleanup_keep_days: days,
 				cleanup_keep_count: count,
+				keep_manual_clips: keepManualClips,
 				keep_raw_episodes: keepRawEpisodes,
 				custom_prompt: customPrompt,
 			});
@@ -1151,10 +1203,38 @@
 				<hr class="border-zinc-200 dark:border-zinc-700" />
 
 				<div>
-					<h4 class="text-sm font-medium text-zinc-700 dark:text-zinc-300">Auto cleanup</h4>
+					<h4 class="text-sm font-medium text-zinc-700 dark:text-zinc-300">
+						Retention policy{#if retentionProfile === 'custom'} (Custom){/if}
+					</h4>
 					<p class="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
-						Delete episode files after clipping. Episodes are kept if they match <strong>either</strong> condition. Leave empty to disable.
+						Delete episode files after clipping. Episodes are kept if they match <strong>either</strong> condition.
 					</p>
+					<div class="mt-2 flex rounded-lg border border-zinc-200 dark:border-zinc-700 overflow-hidden">
+						{#each [{ value: 'live', label: 'Live' }, { value: 'mixed', label: 'Mixed' }, { value: 'archive', label: 'Archive' }] as option}
+							<button
+								type="button"
+								onclick={() => applyRetentionProfile(option.value as 'live' | 'mixed' | 'archive')}
+								class="flex-1 py-2 text-sm font-medium transition-colors {retentionProfile === option.value
+									? 'bg-emerald-600 text-white'
+									: 'text-zinc-600 hover:bg-zinc-50 dark:text-zinc-400 dark:hover:bg-zinc-800'}"
+							>
+								{option.label}
+							</button>
+						{/each}
+					</div>
+					{#if retentionProfile === 'live'}
+						<p class="mt-2 rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:bg-amber-950 dark:text-amber-200">
+							Warning: Live removes manual clips too. The next daily cleanup can remove existing files.
+						</p>
+					{:else if retentionProfile === 'archive'}
+						<p class="mt-2 rounded-lg bg-zinc-100 px-3 py-2 text-xs text-zinc-600 dark:bg-zinc-800 dark:text-zinc-400">
+							Archive stops future cleanup but cannot restore files already removed.
+						</p>
+					{:else if retentionProfile === 'mixed'}
+						<p class="mt-2 text-xs text-zinc-500 dark:text-zinc-400">
+							Mixed keeps all manual clips and the newest automatic clips.
+						</p>
+					{/if}
 				</div>
 				<div>
 					<label for="cleanup-days" class="block text-sm text-zinc-600 dark:text-zinc-400">
@@ -1165,6 +1245,7 @@
 						type="number"
 						min="0"
 						bind:value={cleanupKeepDays}
+						oninput={markRetentionCustom}
 						placeholder="e.g. 30"
 						class="mt-1 w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500/20 dark:border-zinc-700 dark:bg-zinc-900 dark:text-white"
 					/>
@@ -1178,10 +1259,25 @@
 						type="number"
 						min="0"
 						bind:value={cleanupKeepCount}
+						oninput={markRetentionCustom}
 						placeholder="e.g. 10"
 						class="mt-1 w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500/20 dark:border-zinc-700 dark:bg-zinc-900 dark:text-white"
 					/>
 				</div>
+				<label class="flex items-start gap-3">
+					<input
+						type="checkbox"
+						bind:checked={keepManualClips}
+						onchange={markRetentionCustom}
+						class="mt-0.5 h-4 w-4 rounded border-zinc-300 text-emerald-600 focus:ring-emerald-500/20 dark:border-zinc-700 dark:bg-zinc-900"
+					/>
+					<span>
+						<span class="block text-sm text-zinc-700 dark:text-zinc-300">Keep manual clips</span>
+						<span class="mt-0.5 block text-xs text-zinc-500 dark:text-zinc-400">
+							Clips you queue yourself are never removed by automatic cleanup. Turn off for Live podcasts.
+						</span>
+					</span>
+				</label>
 				<label class="flex items-start gap-3">
 					<input
 						type="checkbox"

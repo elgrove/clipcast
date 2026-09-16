@@ -11,6 +11,7 @@ export interface PodcastShow {
 	image_url: string | null;
 	cleanup_keep_days: number | null;
 	cleanup_keep_count: number | null;
+	keep_manual_clips: boolean;
 	keep_raw_episodes: boolean;
 	custom_prompt: string;
 }
@@ -33,6 +34,7 @@ export interface PodcastEpisode {
 	ad_break_count: number;
 	ad_break_seconds: number;
 	clipping_status: string | null;
+	clip_source: 'manual' | 'automatic' | null;
 }
 
 export interface Advert {

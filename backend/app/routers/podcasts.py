@@ -36,6 +36,7 @@ def _podcast_to_read(podcast: PodcastShow, episode_count: int = 0) -> PodcastSho
         image_url=image_url,
         cleanup_keep_days=podcast.cleanup_keep_days,
         cleanup_keep_count=podcast.cleanup_keep_count,
+        keep_manual_clips=podcast.keep_manual_clips,
         keep_raw_episodes=podcast.keep_raw_episodes,
         custom_prompt=podcast.custom_prompt,
     )
@@ -88,6 +89,11 @@ def add_podcast(data: PodcastShowCreate, session: Session = Depends(get_session)
         source_rss_url=podcast_info.feed_url,
         path_directory=PodcastShow.generate_directory_name(podcast_info.title),
         clip_mode=clip_mode,
+        # New podcasts default to the Mixed profile: keep manual clips and
+        # retain the newest 5 automatic clips.
+        cleanup_keep_days=data.cleanup_keep_days,
+        cleanup_keep_count=(data.cleanup_keep_count if data.cleanup_keep_count is not None else 5),
+        keep_manual_clips=(data.keep_manual_clips if data.keep_manual_clips is not None else True),
     )
     podcast.directory.mkdir(parents=True, exist_ok=True)
 
@@ -141,6 +147,8 @@ def update_podcast(
         podcast.cleanup_keep_count = (
             data.cleanup_keep_count if data.cleanup_keep_count > 0 else None
         )
+    if data.keep_manual_clips is not None:
+        podcast.keep_manual_clips = data.keep_manual_clips
     if data.keep_raw_episodes is not None:
         podcast.keep_raw_episodes = data.keep_raw_episodes
     if data.custom_prompt is not None:

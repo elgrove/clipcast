@@ -108,6 +108,11 @@ class ClipMode(StrEnum):
     BBC = "bbc"
 
 
+class ClipSource(StrEnum):
+    MANUAL = "manual"
+    AUTOMATIC = "automatic"
+
+
 class Provider(StrEnum):
     GEMINI = "gemini"
     OPENAI = "openai"
@@ -246,6 +251,7 @@ class PodcastShow(SQLModel, table=True):
     initial_sync_completed: bool = Field(default=False)
     cleanup_keep_days: int | None = Field(default=None)
     cleanup_keep_count: int | None = Field(default=None)
+    keep_manual_clips: bool = Field(default=True)
     keep_raw_episodes: bool = Field(default=False)
     custom_prompt: str = Field(default="", sa_column=Column(Text))
 
@@ -285,6 +291,7 @@ class PodcastEpisode(SQLModel, table=True):
     image_url: str | None = Field(default=None, max_length=500)
     stored_filename: str = Field(default="", max_length=500)
     cleaned_at: datetime | None = Field(default=None)
+    clip_source: str | None = Field(default=None, max_length=10)
     ad_breaks_json: str = Field(default="[]", sa_column=Column("ad_breaks", Text))
     transcription_json: str = Field(default="[]", sa_column=Column("transcription", Text))
 
@@ -486,6 +493,7 @@ class PodcastShowRead(PydanticBaseModel):
     image_url: str | None = None
     cleanup_keep_days: int | None = None
     cleanup_keep_count: int | None = None
+    keep_manual_clips: bool = True
     keep_raw_episodes: bool = False
     custom_prompt: str = ""
 
@@ -508,18 +516,23 @@ class PodcastEpisodeRead(PydanticBaseModel):
     ad_break_count: int = 0
     ad_break_seconds: int = 0
     clipping_status: str | None = None
+    clip_source: str | None = None
 
 
 class PodcastShowCreate(PydanticBaseModel):
     itunes_id: str = ""
     feed_url: str = ""
     clip_mode: str = ClipMode.AI
+    cleanup_keep_days: int | None = None
+    cleanup_keep_count: int | None = 5
+    keep_manual_clips: bool | None = True
 
 
 class PodcastShowUpdate(PydanticBaseModel):
     clip_mode: str | None = None
     cleanup_keep_days: int | None = None
     cleanup_keep_count: int | None = None
+    keep_manual_clips: bool | None = None
     keep_raw_episodes: bool | None = None
     custom_prompt: str | None = None
 
