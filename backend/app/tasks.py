@@ -16,6 +16,7 @@ from app.models import (
     AppConfig,
     ClipMode,
     ClippingReport,
+    ClipSource,
     PodcastEpisode,
     PodcastShow,
     Provider,
@@ -1060,7 +1061,19 @@ def queue_episode_for_clipping(
     episode: PodcastEpisode,
     task_name_prefix: str = "Clip",
     initial_log: str = None,
+    clip_source: str | ClipSource | None = None,
 ) -> ClippingReport:
+    # Tag the episode source. A manual clip stays manual: automatic clips
+    # never overwrite an existing manual source.
+    if clip_source is not None:
+        source_value = (
+            clip_source.value if isinstance(clip_source, ClipSource) else str(clip_source)
+        )
+        if source_value == ClipSource.MANUAL or episode.clip_source != ClipSource.MANUAL:
+            episode.clip_source = source_value
+            session.add(episode)
+            session.commit()
+            session.refresh(episode)
     report = ClippingReport(episode_id=episode.id)
     if initial_log:
         report.append_log(initial_log)
@@ -1236,6 +1249,7 @@ def sync_and_process_new_episodes() -> dict[str, int]:
                             episode,
                             task_name_prefix="Clip (Auto)",
                             initial_log=f"Discovered new episode: {episode.title}",
+                            clip_source=ClipSource.AUTOMATIC,
                         )
 
                     for ep in rss_data.episodes:
@@ -1255,6 +1269,7 @@ def sync_and_process_new_episodes() -> dict[str, int]:
                                 episode,
                                 task_name_prefix="Clip (Retry)",
                                 initial_log=f"Resuming incomplete clipping for: {episode.title}",
+                                clip_source=ClipSource.AUTOMATIC,
                             )
 
                 results[str(podcast.id)] = new_count
@@ -1308,6 +1323,9 @@ def cleanup_old_episodes() -> dict[str, int]:
 
 
 def _cleanup_podcast_episodes(session: Session, podcast: PodcastShow) -> int:
+    # Archive profile: no retention rules configured — remove nothing.
+    if podcast.cleanup_keep_count is None and podcast.cleanup_keep_days is None:
+        return 0
     # Get all clipped, non-cleaned episodes ordered by publish date
     clipped_episodes = session.exec(
         select(PodcastEpisode)
@@ -1321,23 +1339,33 @@ def _cleanup_podcast_episodes(session: Session, podcast: PodcastShow) -> int:
         .distinct()
     ).all()
 
+    # Mixed profile (keep_manual_clips on): manual clips are never candidates.
+    # Filter them out before calculating retention so they never consume an
+    # automatic retention slot. Unknown (None) sources are treated as manual
+    # to protect files rather than delete them.
+    if podcast.keep_manual_clips:
+        candidates = [ep for ep in clipped_episodes if ep.clip_source == ClipSource.AUTOMATIC]
+    else:
+        # Live profile: every clipped episode is a candidate.
+        candidates = list(clipped_episodes)
+
     now = datetime.utcnow()
     protected_ids: set[str] = set()
 
-    # Protect the N most recent episodes
+    # Protect the N most recent episodes (newest automatic in Mixed mode)
     if podcast.cleanup_keep_count is not None:
-        for ep in clipped_episodes[: podcast.cleanup_keep_count]:
+        for ep in candidates[: podcast.cleanup_keep_count]:
             protected_ids.add(ep.id)
 
     # Protect episodes newer than N days
     if podcast.cleanup_keep_days is not None:
         cutoff = now - timedelta(days=podcast.cleanup_keep_days)
-        for ep in clipped_episodes:
+        for ep in candidates:
             if ep.published_at and ep.published_at > cutoff:
                 protected_ids.add(ep.id)
 
     # Skip episodes with active clipping reports
-    for ep in clipped_episodes:
+    for ep in candidates:
         if ep.id in protected_ids:
             continue
         active = session.exec(
@@ -1351,7 +1379,7 @@ def _cleanup_podcast_episodes(session: Session, podcast: PodcastShow) -> int:
             protected_ids.add(ep.id)
 
     count = 0
-    for ep in clipped_episodes:
+    for ep in candidates:
         if ep.id in protected_ids:
             continue
         files_deleted = _delete_episode_files(ep, keep_raw=podcast.keep_raw_episodes)

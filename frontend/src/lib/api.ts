@@ -59,14 +59,27 @@ export async function getPodcast(id: string): Promise<PodcastShow> {
 
 export async function addPodcast(
 	podcast: { itunes_id: string; feed_url: string },
-	clipMode: string
+	clipMode: string,
+	retention?: {
+		cleanup_keep_days?: number | null;
+		cleanup_keep_count?: number | null;
+		keep_manual_clips?: boolean;
+	}
 ): Promise<PodcastShow> {
+	const retentionBody = {
+		cleanup_keep_days: retention?.cleanup_keep_days ?? null,
+		cleanup_keep_count:
+			retention?.cleanup_keep_count !== undefined
+				? retention.cleanup_keep_count
+				: 5,
+		keep_manual_clips: retention?.keep_manual_clips ?? true
+	};
 	return fetchApi<PodcastShow>('/api/podcasts', {
 		method: 'POST',
 		body: JSON.stringify(
 			podcast.itunes_id
-				? { itunes_id: podcast.itunes_id, clip_mode: clipMode }
-				: { feed_url: podcast.feed_url, clip_mode: clipMode }
+				? { itunes_id: podcast.itunes_id, clip_mode: clipMode, ...retentionBody }
+				: { feed_url: podcast.feed_url, clip_mode: clipMode, ...retentionBody }
 		)
 	});
 }
@@ -83,6 +96,7 @@ export async function updatePodcast(
 		clip_mode?: string;
 		cleanup_keep_days?: number | null;
 		cleanup_keep_count?: number | null;
+		keep_manual_clips?: boolean;
 		keep_raw_episodes?: boolean;
 		custom_prompt?: string;
 	}

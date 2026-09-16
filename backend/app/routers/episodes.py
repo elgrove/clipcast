@@ -9,6 +9,7 @@ from app.models import (
     BatchClipRequest,
     ClippingReport,
     ClippingReportRead,
+    ClipSource,
     EpisodeDetailRead,
     PodcastEpisode,
     PodcastEpisodeRead,
@@ -61,6 +62,7 @@ def _episode_to_read(episode: PodcastEpisode, session: Session) -> PodcastEpisod
         ad_break_count=len(breaks),
         ad_break_seconds=ad_break_seconds,
         clipping_status=latest_report.status.value if latest_report else None,
+        clip_source=episode.clip_source,
     )
 
 
@@ -168,7 +170,7 @@ def queue_clip(episode_id: str, session: Session = Depends(get_session)):
     if not episode:
         raise HTTPException(status_code=404, detail="Episode not found")
 
-    report = queue_episode_for_clipping(session, episode)
+    report = queue_episode_for_clipping(session, episode, clip_source=ClipSource.MANUAL)
     logger.info("Queued clipping for episode: %s", episode.title)
     return {"message": f"Clipping queued: {episode.title}", "report_id": report.id}
 
@@ -179,7 +181,7 @@ def batch_clip(data: BatchClipRequest, session: Session = Depends(get_session)):
     for episode_id in data.episode_ids:
         episode = session.get(PodcastEpisode, episode_id)
         if episode:
-            report = queue_episode_for_clipping(session, episode)
+            report = queue_episode_for_clipping(session, episode, clip_source=ClipSource.MANUAL)
             reports.append(report.id)
     return {"message": f"Clipping queued for {len(reports)} episodes", "report_ids": reports}
 
@@ -196,7 +198,7 @@ def clip_all_episodes(podcast_id: str, session: Session = Depends(get_session)):
 
     reports = []
     for episode in episodes:
-        report = queue_episode_for_clipping(session, episode)
+        report = queue_episode_for_clipping(session, episode, clip_source=ClipSource.MANUAL)
         reports.append(report.id)
 
     return {"message": f"Clipping queued for {len(reports)} episodes", "report_ids": reports}

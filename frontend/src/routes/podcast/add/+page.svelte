@@ -14,6 +14,33 @@
 	let checkForAds = $state(true);
 	let adding = $state(false);
 
+	// Retention profile defaults to Mixed: keep manual clips, newest 5 automatic.
+	let retentionProfile: 'live' | 'archive' | 'mixed' | 'custom' = $state('mixed');
+	let retentionCount: string = $state('5');
+	let retentionDays: string = $state('');
+	let keepManualClips: boolean = $state(true);
+
+	function applyRetentionProfile(profile: 'live' | 'archive' | 'mixed') {
+		retentionProfile = profile;
+		if (profile === 'live') {
+			keepManualClips = false;
+			retentionCount = '5';
+			retentionDays = '';
+		} else if (profile === 'archive') {
+			keepManualClips = true;
+			retentionCount = '';
+			retentionDays = '';
+		} else {
+			keepManualClips = true;
+			retentionCount = '5';
+			retentionDays = '';
+		}
+	}
+
+	function markRetentionCustom() {
+		retentionProfile = 'custom';
+	}
+
 	$effect(() => {
 		if (debounceTimer) clearTimeout(debounceTimer);
 		const q = query.trim();
@@ -39,7 +66,13 @@
 		if (!selectedPodcast) return;
 		adding = true;
 		try {
-			const podcast = await addPodcast(selectedPodcast, checkForAds ? 'ai' : 'off');
+			const count = retentionCount ? parseInt(retentionCount, 10) : null;
+			const days = retentionDays ? parseInt(retentionDays, 10) : null;
+			const podcast = await addPodcast(selectedPodcast, checkForAds ? 'ai' : 'off', {
+				cleanup_keep_count: count,
+				cleanup_keep_days: days,
+				keep_manual_clips: keepManualClips
+			});
 			toasts.addToast('success', `Added "${podcast.title}" to library`);
 			goto(`/podcast/${podcast.id}`);
 		} catch (e: any) {
@@ -161,6 +194,79 @@
 						</button>
 					{/each}
 				</div>
+			</div>
+
+			<div class="mt-6">
+				<p class="mb-2 text-sm font-medium text-zinc-700 dark:text-zinc-300">
+					Retention policy{#if retentionProfile === 'custom'} (Custom){/if}
+				</p>
+				<div class="flex rounded-lg border border-zinc-200 dark:border-zinc-700 overflow-hidden">
+					{#each [{ value: 'live', label: 'Live' }, { value: 'mixed', label: 'Mixed' }, { value: 'archive', label: 'Archive' }] as option}
+						<button
+							type="button"
+							onclick={() => applyRetentionProfile(option.value as 'live' | 'mixed' | 'archive')}
+							class="flex-1 py-2 text-sm font-medium transition-colors {retentionProfile === option.value
+								? 'bg-emerald-600 text-white'
+								: 'text-zinc-600 hover:bg-zinc-50 dark:text-zinc-400 dark:hover:bg-zinc-800'}"
+						>
+							{option.label}
+						</button>
+					{/each}
+				</div>
+				<p class="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
+					{#if retentionProfile === 'live'}
+						Keep newest episodes, including manual clips.
+					{:else if retentionProfile === 'archive'}
+						Keep all episodes. Automatic cleanup is disabled.
+					{:else if retentionProfile === 'mixed'}
+						Keep manual clips. Keep newest automatic clips.
+					{:else}
+						Custom retention settings.
+					{/if}
+				</p>
+				{#if retentionProfile !== 'archive'}
+					<div class="mt-3 grid grid-cols-2 gap-3">
+						<div>
+							<label for="retention-count" class="block text-xs text-zinc-600 dark:text-zinc-400">
+								Keep newest (count)
+							</label>
+							<input
+								id="retention-count"
+								type="number"
+								min="0"
+								bind:value={retentionCount}
+								oninput={markRetentionCustom}
+								placeholder="5"
+								class="mt-1 w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm outline-none focus:border-emerald-500 dark:border-zinc-700 dark:bg-zinc-900 dark:text-white"
+							/>
+						</div>
+						<div>
+							<label for="retention-days" class="block text-xs text-zinc-600 dark:text-zinc-400">
+								Keep newer than (days)
+							</label>
+							<input
+								id="retention-days"
+								type="number"
+								min="0"
+								bind:value={retentionDays}
+								oninput={markRetentionCustom}
+								placeholder="Optional"
+								class="mt-1 w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm outline-none focus:border-emerald-500 dark:border-zinc-700 dark:bg-zinc-900 dark:text-white"
+							/>
+						</div>
+					</div>
+					<label class="mt-3 flex items-start gap-2">
+						<input
+							type="checkbox"
+							bind:checked={keepManualClips}
+							onchange={markRetentionCustom}
+							class="mt-0.5 h-4 w-4 rounded border-zinc-300 text-emerald-600 dark:border-zinc-700 dark:bg-zinc-900"
+						/>
+						<span class="text-xs text-zinc-600 dark:text-zinc-400">
+							Keep manual clips (clips you queue yourself are never auto-deleted)
+						</span>
+					</label>
+				{/if}
 			</div>
 
 			<div class="mt-6 flex gap-3 sm:justify-end">
