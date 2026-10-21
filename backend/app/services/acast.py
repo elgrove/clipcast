@@ -68,62 +68,40 @@ def detect_idents(audio_path: Path) -> tuple[list[tuple[float, float]], float]:
     if not IDENT_PATH.exists() or IDENT_PATH.stat().st_size == 0:
         raise FileNotFoundError(f"Acast ident asset not found: {IDENT_PATH}")
 
-    episode = _load_mono_16k(audio_path)
     ident = _load_mono_16k(IDENT_PATH)
-
-    audio_duration = len(episode) / SAMPLE_RATE
     n = len(ident)
-
     ident_centred = ident - ident.mean()
     ident_norm = np.linalg.norm(ident_centred)
-    if ident_norm < 1e-10:
-        return [], audio_duration
-
-    # Normalised cross-correlation. `oaconvolve` (overlap-add) rather than
-    # `fftconvolve`, which would FFT the whole episode in one buffer. Each
-    # full-length array here is ~230 MB for a one-hour episode, so every step
-    # below stays in float32 and reuses its buffers instead of naming a fresh
-    # temporary per line.
-    cross_corr = scipy.signal.oaconvolve(episode, ident_centred[::-1], "valid")
-
     ones = np.ones(n, dtype=np.float32)
-    local_mean = scipy.signal.oaconvolve(episode, ones, "valid")
-    local_mean /= n
-    np.square(episode, out=episode)  # not needed unsquared past this point
-    denominator = scipy.signal.oaconvolve(episode, ones, "valid")
-    denominator /= n
-    del episode
-
-    # E[x²] - E[x]² → variance → std → sqrt(N) * std * ident_norm, in place
-    denominator -= np.square(local_mean)
-    del local_mean
-    np.maximum(denominator, 0.0, out=denominator)
-    np.sqrt(denominator, out=denominator)
-    denominator *= float(np.sqrt(n)) * ident_norm
-
-    # NCC in [-1, 1]
-    np.maximum(denominator, 1e-10, out=denominator)
-    np.divide(cross_corr, denominator, out=cross_corr)
-    np.clip(cross_corr, -1.0, 1.0, out=cross_corr)
-
-    peak_indices = np.where(cross_corr > THRESHOLD)[0]
-
-    # Non-maximum suppression: keep only peaks separated by at least 3x ident
-    # length. 2x lets ringing/echo partials (score ~0.9) slip through just
-    # outside the window and get mispaired against far-away real idents; 3x
-    # absorbs them while staying well under MIN_PAIR_GAP_S so two truly
-    # back-to-back real idents are still detected separately.
+    tail = np.empty(0, dtype=np.float32)
+    total_samples = 0
     kept: list[int] = []
-    if len(peak_indices) > 0:
-        last = peak_indices[0]
-        kept.append(last)
-        for idx in peak_indices[1:]:
-            if idx - last >= 3 * n:
-                kept.append(idx)
-                last = idx
 
-    idents = [(int(idx) / SAMPLE_RATE, (int(idx) + n) / SAMPLE_RATE) for idx in kept]
-    return idents, audio_duration
+    for block in audio.iter_mono_blocks(audio_path, SAMPLE_RATE):
+        offset = total_samples - len(tail)
+        total_samples += len(block)
+        episode = np.concatenate((tail, block))
+        # Retain n-1 samples so matches across a block boundary are measured once.
+        tail = episode[-(n - 1) :].copy() if n > 1 else np.empty(0, dtype=np.float32)
+        if len(episode) < n or ident_norm < 1e-10:
+            continue
+        cross_corr = scipy.signal.oaconvolve(episode, ident_centred[::-1], "valid")
+        local_mean = scipy.signal.oaconvolve(episode, ones, "valid") / n
+        np.square(episode, out=episode)
+        denominator = scipy.signal.oaconvolve(episode, ones, "valid") / n
+        denominator -= np.square(local_mean)
+        np.maximum(denominator, 0.0, out=denominator)
+        np.sqrt(denominator, out=denominator)
+        denominator *= float(np.sqrt(n)) * ident_norm
+        np.maximum(denominator, 1e-10, out=denominator)
+        cross_corr /= denominator
+        for index in np.flatnonzero(cross_corr > THRESHOLD):
+            absolute = offset + int(index)
+            if not kept or absolute - kept[-1] >= 3 * n:
+                kept.append(absolute)
+
+    idents = [(index / SAMPLE_RATE, (index + n) / SAMPLE_RATE) for index in kept]
+    return idents, total_samples / SAMPLE_RATE
 
 
 def pair_idents(

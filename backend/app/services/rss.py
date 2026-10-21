@@ -6,6 +6,7 @@ from email.utils import parsedate_to_datetime
 import feedparser
 import requests
 from pydantic import BaseModel as PydanticBaseModel
+from sqlalchemy.orm import defer
 from sqlmodel import Session, select
 
 from app.models import ClipMode, PodcastEpisode, PodcastShow
@@ -276,12 +277,14 @@ def sync_podcast_from_itunes(session: Session, itunes_id: str) -> PodcastShow:
     return podcast
 
 
-def sync_podcast_show_from_rss(session: Session, podcast: PodcastShow) -> PodcastShow:
+def sync_podcast_show_from_rss(
+    session: Session, podcast: PodcastShow, rss_data: RSSPodcast | None = None
+) -> PodcastShow:
     if not podcast.source_rss_url:
         raise ValueError(f"Podcast {podcast.title} has no RSS feed URL")
 
     logger.info("Parsing RSS feed for %s from %s", podcast.title, podcast.source_rss_url)
-    rss_data = parse_rss_feed(podcast.source_rss_url)
+    rss_data = rss_data or parse_rss_feed(podcast.source_rss_url)
     logger.debug("RSS feed parsed, found %d episodes", len(rss_data.episodes))
 
     if rss_data.description:
@@ -305,28 +308,34 @@ def sync_podcast_show_from_rss(session: Session, podcast: PodcastShow) -> Podcas
 
 
 def sync_podcast_episodes_from_rss(
-    session: Session, podcast: PodcastShow, max_episodes: int = None
+    session: Session,
+    podcast: PodcastShow,
+    max_episodes: int = None,
+    rss_data: RSSPodcast | None = None,
 ) -> list[PodcastEpisode]:
     if not podcast.source_rss_url:
         raise ValueError(f"Podcast {podcast.title} has no RSS feed URL")
 
-    rss_data = parse_rss_feed(podcast.source_rss_url)
+    rss_data = rss_data or parse_rss_feed(podcast.source_rss_url)
 
     episodes_to_sync = rss_data.episodes
     if max_episodes:
         episodes_to_sync = episodes_to_sync[:max_episodes]
 
+    existing = {
+        episode.guid: episode
+        for episode in session.exec(
+            select(PodcastEpisode)
+            .where(PodcastEpisode.podcast_id == podcast.id)
+            .options(defer(PodcastEpisode.transcription_json))
+        ).all()
+    }
     synced = []
     for ep in episodes_to_sync:
         if not ep.guid or not ep.audio_url:
             continue
 
-        episode = session.exec(
-            select(PodcastEpisode).where(
-                PodcastEpisode.podcast_id == podcast.id,
-                PodcastEpisode.guid == ep.guid,
-            )
-        ).first()
+        episode = existing.get(ep.guid)
 
         if episode:
             episode.title = ep.title
@@ -347,11 +356,10 @@ def sync_podcast_episodes_from_rss(
                 image_url=ep.artwork_url,
             )
 
+        existing[ep.guid] = episode
         session.add(episode)
         synced.append(episode)
 
     session.commit()
-    for episode in synced:
-        session.refresh(episode)
 
     return synced

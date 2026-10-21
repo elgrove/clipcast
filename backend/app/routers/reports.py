@@ -3,6 +3,7 @@ import logging
 from datetime import datetime
 
 from fastapi import APIRouter, Depends, Query
+from sqlalchemy.orm import defer, joinedload
 from sqlmodel import Session, select
 
 from app.database import get_session
@@ -26,7 +27,9 @@ def _report_duration(rep: dict | None) -> float | None:
     return (end - start).total_seconds()
 
 
-def report_to_detail(report: ClippingReport, session: Session) -> ClippingReportDetail | None:
+def report_to_detail(
+    report: ClippingReport, session: Session, model_names: dict[str, str] | None = None
+) -> ClippingReportDetail | None:
     episode = session.get(PodcastEpisode, report.episode_id)
     if not episode:
         return None
@@ -39,6 +42,8 @@ def report_to_detail(report: ClippingReport, session: Session) -> ClippingReport
     def _model_name(model_id: str | None) -> str | None:
         if not model_id:
             return None
+        if model_names is not None:
+            return model_names.get(model_id)
         m = session.get(AIModel, model_id)
         return str(m) if m else None
 
@@ -84,7 +89,32 @@ def list_reports(
     session: Session = Depends(get_session),
 ):
     reports = session.exec(
-        select(ClippingReport).order_by(ClippingReport.queued_at.desc()).limit(limit)
+        select(ClippingReport)
+        .options(
+            defer(ClippingReport.logs),
+            joinedload(ClippingReport.episode).defer(PodcastEpisode.transcription_json),
+            joinedload(ClippingReport.episode).joinedload(PodcastEpisode.podcast),
+        )
+        .order_by(ClippingReport.queued_at.desc())
+        .limit(limit)
     ).all()
 
-    return [d for r in reports if (d := report_to_detail(r, session))]
+    model_ids = {
+        model_id
+        for report in reports
+        for model_id in (
+            report.transcription_model_id,
+            report.analysis_model_id,
+            report.refinement_model_id,
+        )
+        if model_id
+    }
+    model_names = (
+        {
+            model.id: str(model)
+            for model in session.exec(select(AIModel).where(AIModel.id.in_(model_ids))).all()
+        }
+        if model_ids
+        else {}
+    )
+    return [d for r in reports if (d := report_to_detail(r, session, model_names))]

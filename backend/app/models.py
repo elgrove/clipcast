@@ -6,7 +6,7 @@ from pathlib import Path
 
 from pydantic import BaseModel as PydanticBaseModel
 from pydantic import Field as PydanticField
-from sqlalchemy import UniqueConstraint
+from sqlalchemy import Index, UniqueConstraint, text
 from sqlmodel import Column, Field, Relationship, SQLModel, Text
 
 from app.config import settings
@@ -140,6 +140,7 @@ class ClippingStatus(StrEnum):
     REFINING = "refining"
     EDITING = "editing"
     COMPLETED = "completed"
+    FAILED = "failed"
 
     @property
     def order(self) -> int:
@@ -151,6 +152,7 @@ class ClippingStatus(StrEnum):
             ClippingStatus.REFINING: 4,
             ClippingStatus.EDITING: 5,
             ClippingStatus.COMPLETED: 6,
+            ClippingStatus.FAILED: 7,
         }[self]
 
 
@@ -276,7 +278,11 @@ class PodcastShow(SQLModel, table=True):
 
 class PodcastEpisode(SQLModel, table=True):
     __tablename__ = "podcast_episodes"
-    __table_args__ = ({"sqlite_autoincrement": False},)
+    __table_args__ = (
+        Index("ix_episode_podcast_published", "podcast_id", "published_at"),
+        Index("ix_episode_podcast_guid", "podcast_id", "guid"),
+        {"sqlite_autoincrement": False},
+    )
 
     id: str = Field(default_factory=new_uuid, primary_key=True)
     created_at: datetime = Field(default_factory=datetime.utcnow)
@@ -364,6 +370,17 @@ class PodcastEpisode(SQLModel, table=True):
 
 class ClippingReport(SQLModel, table=True):
     __tablename__ = "clipping_reports"
+    __table_args__ = (
+        Index("ix_report_episode_queued", "episode_id", "queued_at"),
+        Index("ix_report_queued", "queued_at"),
+        Index(
+            "uq_report_active_episode", "episode_id", unique=True, sqlite_where=text("active = 1")
+        ),
+    )
+
+    active: bool = Field(default=False)
+    lease_until: datetime | None = Field(default=None)
+    download_only: bool = Field(default=False)
 
     id: str = Field(default_factory=new_uuid, primary_key=True)
     created_at: datetime = Field(default_factory=datetime.utcnow)
@@ -400,8 +417,10 @@ class ClippingReport(SQLModel, table=True):
         # offline evaluation), so episodes go ANALYSING → EDITING directly.
         # The REFINING enum value and `refined_at` column remain available for
         # the eval pipeline and for a future re-enable.
-        if self.edited_at:
+        if self.edited_at or (self.download_only and self.downloaded_at):
             return ClippingStatus.COMPLETED
+        if not self.active and self.exceptions_json != "[]":
+            return ClippingStatus.FAILED
         if self.analysed_at:
             return ClippingStatus.EDITING
         if self.transcribed_at:

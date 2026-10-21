@@ -288,3 +288,10 @@ export async function submitBugReport(input: BugReportInput): Promise<BugReportR
 		body: JSON.stringify(input)
 	});
 }
+
+export async function getEpisodeStatuses(ids: string[]): Promise<Record<string, { id: string; status: string }>> {
+	return fetchApi('/api/episodes/statuses', {
+		method: 'POST',
+		body: JSON.stringify({ episode_ids: ids })
+	});
+}

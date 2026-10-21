@@ -6,6 +6,11 @@ from datetime import datetime, timedelta
 from pathlib import Path
 
 from celery import chain
+from celery.exceptions import Ignore
+from celery.signals import task_failure, task_postrun
+from sqlalchemy import update
+from sqlalchemy.exc import IntegrityError
+from sqlalchemy.orm import load_only
 from sqlmodel import Session, select
 
 from app.database import engine
@@ -24,15 +29,27 @@ from app.models import (
     TranscriptionReport,
 )
 from app.services import audio, bbc
+from app.services.checkpoints import CheckpointProvider, clear_checkpoints
 from app.services.download import download_episode
 from app.services.editor import edit_episode, format_ms_to_time, parse_time_to_ms
 from app.services.providers import get_ai_provider
 from app.services.refinement import refine_or_snap_boundary
+from app.services.rss import (
+    parse_rss_feed,
+    sync_podcast_episodes_from_rss,
+    sync_podcast_show_from_rss,
+)
 from app.worker import celery_app
 
 logger = logging.getLogger("clipcast")
 
 STALE_REPORT_THRESHOLD = timedelta(hours=4)
+QUEUED_JOB_LEASE = timedelta(hours=24)
+RUNNING_JOB_LEASE = timedelta(hours=6)
+
+
+class DownloadInProgressError(ValueError):
+    pass
 
 
 def _update_report(report_id: str, **fields) -> None:
@@ -61,6 +78,80 @@ def _fail_report(report_id: str, exception: Exception, message: str) -> None:
         session.commit()
 
 
+def expire_job_claims(session: Session) -> None:
+    session.exec(
+        update(ClippingReport)
+        .where(
+            ClippingReport.active.is_(True),
+            ClippingReport.edited_at.isnot(None)
+            | (ClippingReport.download_only.is_(True) & ClippingReport.downloaded_at.isnot(None)),
+        )
+        .values(active=False)
+    )
+    session.exec(
+        update(ClippingReport)
+        .where(
+            ClippingReport.active.is_(True),
+            ClippingReport.lease_until <= datetime.utcnow(),
+        )
+        .values(active=False, exceptions_json='["Job lease expired; the job can be retried."]')
+    )
+    session.commit()
+
+
+def renew_job_claim(report_id: str) -> None:
+    with Session(engine) as session:
+        report = session.get(ClippingReport, report_id)
+        if not report or report.lease_until is None:
+            return
+        result = session.exec(
+            update(ClippingReport)
+            .where(
+                ClippingReport.id == report.id,
+                ClippingReport.active.is_(True),
+                ClippingReport.lease_until > datetime.utcnow(),
+            )
+            .values(lease_until=datetime.utcnow() + RUNNING_JOB_LEASE)
+        )
+        session.commit()
+        if result.rowcount != 1:
+            raise Ignore()
+
+
+@task_postrun.connect
+def release_completed_job(sender=None, args=None, state=None, **kwargs):
+    if (
+        state != "SUCCESS"
+        or not sender
+        or sender.name not in ("app.tasks.task_download", "app.tasks.task_edit")
+        or not args
+        or len(args) < 2
+    ):
+        return
+    with Session(engine) as session:
+        report = session.get(ClippingReport, args[1])
+        if report and (sender.name == "app.tasks.task_edit" or report.download_only):
+            report.active = False
+            clear_checkpoints(report.id)
+            session.add(report)
+            session.commit()
+
+
+@task_failure.connect
+def release_failed_job(sender=None, args=None, exception=None, **kwargs):
+    if not sender or not sender.name.startswith("app.tasks.task_") or not args or len(args) < 2:
+        return
+    with Session(engine) as session:
+        report = session.get(ClippingReport, args[1])
+        if report:
+            report.active = False
+            clear_checkpoints(report.id)
+            if report.exceptions_json == "[]" and exception is not None:
+                report.add_exception(exception)
+            session.add(report)
+            session.commit()
+
+
 # ── Pipeline step tasks ──────────────────────────────────────────────────────
 
 
@@ -76,6 +167,7 @@ def _fail_report(report_id: str, exception: Exception, message: str) -> None:
     time_limit=660,
 )
 def task_download(self, episode_id: str, report_id: str) -> None:
+    renew_job_claim(report_id)
     with Session(engine) as session:
         episode = session.get(PodcastEpisode, episode_id)
         if not episode:
@@ -86,7 +178,8 @@ def task_download(self, episode_id: str, report_id: str) -> None:
         session.add(episode)
         session.commit()
 
-        if episode.mp3_path.exists():
+        if episode.has_file:
+            _update_report(report_id, downloaded_at=datetime.utcnow())
             _log_report(report_id, "Episode already downloaded, skipping")
             return
 
@@ -117,6 +210,7 @@ def task_transcribe(self, episode_id: str, report_id: str) -> None:
     from app.services.transcription import segments_to_srt, transcribe_audio
 
     # Brief DB read: get what we need
+    renew_job_claim(report_id)
     with Session(engine) as session:
         episode = session.get(PodcastEpisode, episode_id)
         if not episode:
@@ -132,7 +226,7 @@ def task_transcribe(self, episode_id: str, report_id: str) -> None:
 
         audio_path = episode.mp3_path
         srt_path = episode.srt_path
-        provider = get_ai_provider("transcription", config)
+        provider = CheckpointProvider(get_ai_provider("transcription", config), report_id)
         model_provider = config.transcription_model.provider.kind
         model_name = config.transcription_model.name
 
@@ -194,6 +288,7 @@ def task_analyse(self, episode_id: str, report_id: str) -> None:
     from app.services.providers import get_ai_provider
 
     # Brief DB read
+    renew_job_claim(report_id)
     with Session(engine) as session:
         episode = session.get(PodcastEpisode, episode_id)
         if not episode:
@@ -211,7 +306,7 @@ def task_analyse(self, episode_id: str, report_id: str) -> None:
         if not config or not config.analysis_model:
             raise ValueError("Analysis model not configured")
 
-        provider = get_ai_provider("analysis", config)
+        provider = CheckpointProvider(get_ai_provider("analysis", config), report_id)
         model_provider = config.analysis_model.provider.kind
         model_name = config.analysis_model.name
 
@@ -280,6 +375,7 @@ def task_refine_boundaries(self, episode_id: str, report_id: str) -> None:
 
     Opt-in: if no boundary_refinement_model is configured, this task no-ops and
     leaves the analysed timestamps untouched."""
+    renew_job_claim(report_id)
     with Session(engine) as session:
         report = session.get(ClippingReport, report_id)
         if report and report.refined_at:
@@ -422,6 +518,7 @@ def task_refine_boundaries(self, episode_id: str, report_id: str) -> None:
     time_limit=1860,
 )
 def task_edit(self, episode_id: str, report_id: str) -> None:
+    renew_job_claim(report_id)
     _log_report(report_id, "Editing episode...")
 
     with Session(engine) as session:
@@ -456,6 +553,7 @@ def task_edit(self, episode_id: str, report_id: str) -> None:
 def task_detect_acast_ads(self, episode_id: str, report_id: str) -> None:
     from app.services.acast import detect_idents, idents_to_ad_breaks, pair_idents
 
+    renew_job_claim(report_id)
     with Session(engine) as session:
         episode = session.get(PodcastEpisode, episode_id)
         if not episode:
@@ -573,6 +671,7 @@ def task_scan_acast_ads(self, episode_id: str, report_id: str) -> None:
         ADS_CONTEXT_POST_BREAK_WINDOW,
     )
 
+    renew_job_claim(report_id)
     with Session(engine) as session:
         report = session.get(ClippingReport, report_id)
         if report and report.refined_at:
@@ -598,8 +697,10 @@ def task_scan_acast_ads(self, episode_id: str, report_id: str) -> None:
             return
 
         try:
-            transcribe_provider = get_ai_provider("transcription", config)
-            analyse_provider = get_ai_provider("analysis", config)
+            transcribe_provider = CheckpointProvider(
+                get_ai_provider("transcription", config), report_id
+            )
+            analyse_provider = CheckpointProvider(get_ai_provider("analysis", config), report_id)
         except ValueError as e:
             _log_report(report_id, f"Acast AI scan skipped — {e}")
             _update_report(report_id, refined_at=datetime.utcnow())
@@ -652,6 +753,8 @@ def task_scan_acast_ads(self, episode_id: str, report_id: str) -> None:
         """Export the [start_ms, end_ms) slice, transcribe it, and run ``analyse``
         (a provider method taking a Transcription). Returns the window-relative
         breaks, or None if the slice had no speech."""
+        transcribe_provider.scope = (start_ms, end_ms)
+        analyse_provider.scope = (start_ms, end_ms)
         temp_fd, temp_path_str = tempfile.mkstemp(suffix=".mp3")
         temp_path = Path(temp_path_str)
         os.close(temp_fd)
@@ -869,6 +972,7 @@ def task_trim_scan(self, episode_id: str, report_id: str) -> None:
     ``task_edit`` and the episode UI work unchanged. Unusable model output
     leaves the episode uncut and flags the report — never mangle audio on a
     bad guess."""
+    renew_job_claim(report_id)
     with Session(engine) as session:
         episode = session.get(PodcastEpisode, episode_id)
         if not episode:
@@ -894,8 +998,10 @@ def task_trim_scan(self, episode_id: str, report_id: str) -> None:
             return
 
         try:
-            transcribe_provider = get_ai_provider("transcription", config)
-            analyse_provider = get_ai_provider("analysis", config)
+            transcribe_provider = CheckpointProvider(
+                get_ai_provider("transcription", config), report_id
+            )
+            analyse_provider = CheckpointProvider(get_ai_provider("analysis", config), report_id)
         except ValueError as e:
             _log_report(report_id, f"WARNING: Trim scan skipped — {e}; episode left uncut")
             _update_report(
@@ -1062,6 +1168,7 @@ def queue_episode_for_clipping(
     task_name_prefix: str = "Clip",
     initial_log: str = None,
     clip_source: str | ClipSource | None = None,
+    download_only: bool = False,
 ) -> ClippingReport:
     # Tag the episode source. A manual clip stays manual: automatic clips
     # never overwrite an existing manual source.
@@ -1074,18 +1181,42 @@ def queue_episode_for_clipping(
             session.add(episode)
             session.commit()
             session.refresh(episode)
-    report = ClippingReport(episode_id=episode.id)
+    episode_id = episode.id
+    expire_job_claims(session)
+    report = ClippingReport(
+        episode_id=episode_id,
+        active=True,
+        download_only=download_only,
+        lease_until=datetime.utcnow() + QUEUED_JOB_LEASE,
+    )
     if initial_log:
         report.append_log(initial_log)
     report.append_log(f"Episode queued for clipping: {episode.title}")
     session.add(report)
-    session.commit()
+    try:
+        session.commit()
+    except IntegrityError:
+        session.rollback()
+        existing = session.exec(
+            select(ClippingReport).where(
+                ClippingReport.episode_id == episode_id, ClippingReport.active.is_(True)
+            )
+        ).first()
+        if existing is None:
+            raise
+        if existing.download_only and not download_only:
+            raise DownloadInProgressError(
+                "Download in progress. Clip this episode after the download completes."
+            ) from None
+        return existing
     session.refresh(report)
 
     clip_mode = episode.podcast.clip_mode
     transcription_queue = _get_transcription_queue(session)
 
-    if clip_mode == ClipMode.ACAST:
+    if download_only:
+        pipeline = task_download.si(episode.id, report.id)
+    elif clip_mode == ClipMode.ACAST:
         # The Acast AI scan is a config-gated no-op unless enabled; it transcribes
         # and analyses short windows so it runs on the transcription queue.
         pipeline = chain(
@@ -1113,7 +1244,16 @@ def queue_episode_for_clipping(
             task_edit.si(episode.id, report.id),
         )
 
-    result = pipeline.apply_async()
+    try:
+        result = pipeline.apply_async()
+    except Exception as exc:
+        report.active = False
+        report.add_exception(exc)
+        session.add(report)
+        session.commit()
+        raise
+
+    session.refresh(report)
 
     report.celery_task_id = result.id
     session.add(report)
@@ -1127,8 +1267,6 @@ def queue_episode_for_clipping(
 
 @celery_app.task(name="app.tasks.sync_podcast_show")
 def sync_podcast_show(podcast_id: str) -> str:
-    from app.services.rss import sync_podcast_show_from_rss
-
     with Session(engine) as session:
         podcast = session.get(PodcastShow, podcast_id)
         if not podcast:
@@ -1141,8 +1279,6 @@ def sync_podcast_show(podcast_id: str) -> str:
 
 @celery_app.task(name="app.tasks.sync_podcast_episodes")
 def sync_podcast_episodes(podcast_id: str, max_episodes: int = None) -> int:
-    from app.services.rss import sync_podcast_episodes_from_rss
-
     with Session(engine) as session:
         podcast = session.get(PodcastShow, podcast_id)
         if not podcast:
@@ -1169,7 +1305,9 @@ def _episode_needs_clipping(session: Session, episode: PodcastEpisode) -> bool:
 
     # Never attempted — don't auto-retry
     any_report = session.exec(
-        select(ClippingReport).where(ClippingReport.episode_id == episode.id)
+        select(ClippingReport).where(
+            ClippingReport.episode_id == episode.id, ClippingReport.download_only.is_(False)
+        )
     ).first()
     if not any_report:
         return False
@@ -1190,98 +1328,72 @@ def _episode_needs_clipping(session: Session, episode: PodcastEpisode) -> bool:
 
 @celery_app.task(name="app.tasks.sync_and_process_new_episodes")
 def sync_and_process_new_episodes() -> dict[str, int]:
-    from app.services.rss import parse_rss_feed, sync_podcast_show_from_rss
-
     results = {}
-    with Session(engine) as session:
+    with Session(engine, expire_on_commit=False) as session:
+        expire_job_claims(session)
         podcasts = session.exec(
-            select(PodcastShow).where(PodcastShow.initial_sync_completed == True)  # noqa: E712
+            select(PodcastShow).where(PodcastShow.initial_sync_completed.is_(True))
         ).all()
-
         for podcast in podcasts:
             try:
-                sync_podcast_show_from_rss(session, podcast)
-
                 rss_data = parse_rss_feed(podcast.source_rss_url)
-                new_episodes = []
+                existing_guids = set(
+                    session.exec(
+                        select(PodcastEpisode.guid).where(PodcastEpisode.podcast_id == podcast.id)
+                    ).all()
+                )
+                sync_podcast_show_from_rss(session, podcast, rss_data=rss_data)
+                episodes = sync_podcast_episodes_from_rss(session, podcast, rss_data=rss_data)
+                reports_by_episode = {}
+                for report in session.exec(
+                    select(ClippingReport)
+                    .join(PodcastEpisode)
+                    .where(PodcastEpisode.podcast_id == podcast.id)
+                    .options(
+                        load_only(
+                            ClippingReport.id,
+                            ClippingReport.episode_id,
+                            ClippingReport.edited_at,
+                            ClippingReport.active,
+                            ClippingReport.download_only,
+                            ClippingReport.exceptions_json,
+                            ClippingReport.queued_at,
+                        )
+                    )
+                ).all():
+                    reports_by_episode.setdefault(report.episode_id, []).append(report)
                 new_count = 0
-                incomplete_count = 0
-
-                for ep in rss_data.episodes:
-                    if not ep.guid or not ep.audio_url:
-                        continue
-
-                    episode = session.exec(
-                        select(PodcastEpisode).where(
-                            PodcastEpisode.podcast_id == podcast.id,
-                            PodcastEpisode.guid == ep.guid,
-                        )
-                    ).first()
-
-                    if episode:
-                        episode.title = ep.title
-                        episode.description = ep.description
-                        episode.published_at = ep.published_at
-                        episode.duration = ep.duration
-                        episode.source_audio_url = ep.audio_url
-                        session.add(episode)
-                    else:
-                        episode = PodcastEpisode(
-                            podcast_id=podcast.id,
-                            guid=ep.guid,
-                            title=ep.title,
-                            description=ep.description,
-                            published_at=ep.published_at,
-                            duration=ep.duration,
-                            source_audio_url=ep.audio_url,
-                        )
-                        session.add(episode)
-                        new_episodes.append(episode)
-
-                session.commit()
-
                 if podcast.clip_mode != ClipMode.OFF:
-                    for episode in new_episodes:
-                        session.refresh(episode)
-                        new_count += 1
-                        queue_episode_for_clipping(
-                            session,
-                            episode,
-                            task_name_prefix="Clip (Auto)",
-                            initial_log=f"Discovered new episode: {episode.title}",
-                            clip_source=ClipSource.AUTOMATIC,
-                        )
-
-                    for ep in rss_data.episodes:
-                        if not ep.guid or not ep.audio_url:
+                    seen = set()
+                    for episode in episodes:
+                        if episode.id in seen:
                             continue
-                        episode = session.exec(
-                            select(PodcastEpisode).where(
-                                PodcastEpisode.podcast_id == podcast.id,
-                                PodcastEpisode.guid == ep.guid,
+                        seen.add(episode.id)
+                        is_new = episode.guid not in existing_guids
+                        reports = reports_by_episode.get(episode.id, [])
+                        attempted = [r for r in reports if not r.download_only]
+                        retry = bool(attempted) and not any(
+                            r.edited_at
+                            or r.active
+                            or (
+                                r.exceptions_json == "[]"
+                                and r.queued_at > datetime.utcnow() - STALE_REPORT_THRESHOLD
                             )
-                        ).first()
-                        if episode and _episode_needs_clipping(session, episode):
-                            incomplete_count += 1
-                            logger.info("Re-clipping incomplete episode: %s", episode.title)
+                            for r in attempted
+                        )
+                        if is_new or retry:
                             queue_episode_for_clipping(
                                 session,
                                 episode,
-                                task_name_prefix="Clip (Retry)",
-                                initial_log=f"Resuming incomplete clipping for: {episode.title}",
                                 clip_source=ClipSource.AUTOMATIC,
                             )
-
-                results[str(podcast.id)] = new_count
-                log_parts = [f"found {new_count} new episodes"]
-                if incomplete_count > 0:
-                    log_parts.append(f"re-queued {incomplete_count} incomplete episodes")
-                logger.info("Synced %s: %s", podcast.title, ", ".join(log_parts))
-            except Exception as e:
+                            new_count += int(is_new)
+                results[podcast.id] = new_count
+                logger.info("Synced %s: found %d new episodes", podcast.title, new_count)
+            except Exception:
                 session.rollback()
-                logger.error("Failed to sync/process episodes for %s: %s", podcast.id, e)
-                results[str(podcast.id)] = -1
-
+                logger.exception("Failed to sync/process episodes for %s", podcast.id)
+                results[podcast.id] = -1
     return results
 
 

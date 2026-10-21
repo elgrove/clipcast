@@ -238,7 +238,7 @@
 					{#if episode.has_transcription && !episode.is_clipped && !episode.is_cleaned}
 						<span class="inline-block rounded-full bg-violet-100 px-2 py-0.5 text-xs font-medium text-violet-700 dark:bg-violet-900/30 dark:text-violet-400">Transcribed</span>
 					{/if}
-					{#if episode.clipping_status && episode.clipping_status !== 'completed'}
+					{#if episode.clipping_status && !['completed', 'failed'].includes(episode.clipping_status)}
 						<span class="inline-block rounded-full px-2 py-0.5 text-xs font-medium {statusBadgeClass(episode.clipping_status)}">
 							{episode.clipping_status}
 						</span>
@@ -249,7 +249,7 @@
 				<div class="mt-4 flex flex-wrap gap-2">
 					<button
 						onclick={handleClip}
-						disabled={clipping || (episode.clipping_status !== null && episode.clipping_status !== 'completed')}
+						disabled={clipping || (episode.clipping_status !== null && !['completed', 'failed'].includes(episode.clipping_status))}
 						class="inline-flex items-center gap-1.5 rounded-lg bg-emerald-600 px-3 py-1.5 text-sm font-medium text-white transition-colors hover:bg-emerald-700 disabled:opacity-50"
 					>
 						{#if clipping}
