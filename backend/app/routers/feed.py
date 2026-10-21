@@ -1,3 +1,5 @@
+import hashlib
+
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import FileResponse, Response
 from sqlmodel import Session, select
@@ -5,7 +7,7 @@ from sqlmodel import Session, select
 from app.config import settings
 from app.database import get_session
 from app.models import PodcastShow
-from app.services.feed import generate_podcast_feed
+from app.services.feed import cached_podcast_feed
 
 router = APIRouter(tags=["feed"])
 
@@ -21,8 +23,13 @@ def podcast_feed(
         raise HTTPException(status_code=404, detail="Podcast not found")
 
     base_url = settings.external_url or str(request.base_url).rstrip("/")
-    feed_xml = generate_podcast_feed(session, podcast, base_url)
-    return Response(content=feed_xml, media_type="application/rss+xml")
+    feed_xml = cached_podcast_feed(session, podcast, base_url)
+    etag = '"' + hashlib.sha256(feed_xml).hexdigest() + '"'
+    headers = {"ETag": etag, "Cache-Control": "public, max-age=30"}
+    supplied = request.headers.get("if-none-match", "")
+    if any(tag.strip().removeprefix("W/") in (etag, "*") for tag in supplied.split(",")):
+        return Response(status_code=304, headers=headers)
+    return Response(content=feed_xml, media_type="application/rss+xml", headers=headers)
 
 
 @router.get("/podcasts/{podcast_id}/image.jpg")

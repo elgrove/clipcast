@@ -2,6 +2,7 @@ import logging
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import FileResponse
+from sqlalchemy.orm import defer
 from sqlmodel import Session, func, select
 
 from app.database import get_session
@@ -17,27 +18,30 @@ from app.models import (
     TranscriptionSegment,
 )
 from app.routers.reports import report_to_detail
-from app.tasks import queue_episode_for_clipping
+from app.services.editor import parse_time_to_ms
+from app.services.queries import latest_reports
+from app.tasks import DownloadInProgressError, queue_episode_for_clipping
 
 logger = logging.getLogger("clipcast")
 router = APIRouter(tags=["episodes"])
 
 
-def _episode_to_read(episode: PodcastEpisode, session: Session) -> PodcastEpisodeRead:
-    from app.services.editor import parse_time_to_ms
+def _queue_episode(session, episode, **kwargs):
+    try:
+        return queue_episode_for_clipping(session, episode, **kwargs)
+    except DownloadInProgressError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+def _episode_to_read(
+    episode: PodcastEpisode, latest_report: ClippingReport | None, has_transcription: bool
+) -> PodcastEpisodeRead:
 
     breaks = episode.ad_breaks
-    has_transcription = episode.transcription_json != "[]"
     ad_break_seconds = sum(
         max(parse_time_to_ms(b.end_time) - parse_time_to_ms(b.start_time), 0) // 1000
         for b in breaks
     )
-
-    latest_report = session.exec(
-        select(ClippingReport)
-        .where(ClippingReport.episode_id == episode.id)
-        .order_by(ClippingReport.queued_at.desc())
-    ).first()
 
     is_downloaded = bool(
         episode.cleaned_at or (latest_report and latest_report.downloaded_at) or episode.has_file
@@ -66,6 +70,16 @@ def _episode_to_read(episode: PodcastEpisode, session: Session) -> PodcastEpisod
     )
 
 
+@router.post("/api/episodes/statuses")
+def episode_statuses(data: BatchClipRequest, session: Session = Depends(get_session)):
+    if len(data.episode_ids) > 200:
+        raise HTTPException(status_code=422, detail="At most 200 episodes per request")
+    return {
+        episode_id: {"id": report.id, "status": report.status.value}
+        for episode_id, report in latest_reports(session, data.episode_ids).items()
+    }
+
+
 @router.get("/api/episodes/{episode_id}", response_model=EpisodeDetailRead)
 def get_episode(episode_id: str, session: Session = Depends(get_session)):
     episode = session.get(PodcastEpisode, episode_id)
@@ -74,13 +88,8 @@ def get_episode(episode_id: str, session: Session = Depends(get_session)):
 
     podcast = session.get(PodcastShow, episode.podcast_id)
 
-    latest_report = session.exec(
-        select(ClippingReport)
-        .where(ClippingReport.episode_id == episode.id)
-        .order_by(ClippingReport.queued_at.desc())
-    ).first()
-
-    base = _episode_to_read(episode, session)
+    latest_report = latest_reports(session, [episode.id]).get(episode.id)
+    base = _episode_to_read(episode, latest_report, episode.transcription_json != "[]")
     return EpisodeDetailRead(
         **base.model_dump(),
         podcast_title=podcast.title if podcast else "Unknown",
@@ -120,7 +129,9 @@ def list_episodes(
     if not podcast:
         raise HTTPException(status_code=404, detail="Podcast not found")
 
-    query = select(PodcastEpisode).where(PodcastEpisode.podcast_id == podcast_id)
+    query = select(PodcastEpisode, PodcastEpisode.transcription_json != "[]").where(
+        PodcastEpisode.podcast_id == podcast_id
+    )
 
     if status == "downloaded":
         query = (
@@ -137,12 +148,24 @@ def list_episodes(
 
     query = query.order_by(PodcastEpisode.published_at.desc())
 
-    total = session.exec(select(func.count()).select_from(query.subquery())).one()
+    total = session.exec(
+        select(func.count()).select_from(
+            query.with_only_columns(PodcastEpisode.id).order_by(None).subquery()
+        )
+    ).one()
 
-    episodes = session.exec(query.offset((page - 1) * per_page).limit(per_page)).all()
+    episodes = session.exec(
+        query.options(defer(PodcastEpisode.transcription_json))
+        .offset((page - 1) * per_page)
+        .limit(per_page)
+    ).all()
+    reports = latest_reports(session, [ep.id for ep, _ in episodes])
 
     return {
-        "episodes": [_episode_to_read(ep, session) for ep in episodes],
+        "episodes": [
+            _episode_to_read(ep, reports.get(ep.id), has_transcription)
+            for ep, has_transcription in episodes
+        ],
         "total": total,
         "page": page,
         "per_page": per_page,
@@ -156,12 +179,8 @@ def queue_download(episode_id: str, session: Session = Depends(get_session)):
     if not episode:
         raise HTTPException(status_code=404, detail="Episode not found")
 
-    from app.services.download import download_episode as dl
-
-    # Run download synchronously as it's relatively fast
-    dl(episode)
-    logger.info("Downloaded episode: %s", episode.title)
-    return {"message": f"Downloaded: {episode.title}"}
+    report = _queue_episode(session, episode, download_only=True)
+    return {"message": f"Download queued: {episode.title}", "report_id": report.id}
 
 
 @router.post("/api/episodes/{episode_id}/clip", status_code=202)
@@ -170,7 +189,7 @@ def queue_clip(episode_id: str, session: Session = Depends(get_session)):
     if not episode:
         raise HTTPException(status_code=404, detail="Episode not found")
 
-    report = queue_episode_for_clipping(session, episode, clip_source=ClipSource.MANUAL)
+    report = _queue_episode(session, episode, clip_source=ClipSource.MANUAL)
     logger.info("Queued clipping for episode: %s", episode.title)
     return {"message": f"Clipping queued: {episode.title}", "report_id": report.id}
 
@@ -181,7 +200,7 @@ def batch_clip(data: BatchClipRequest, session: Session = Depends(get_session)):
     for episode_id in data.episode_ids:
         episode = session.get(PodcastEpisode, episode_id)
         if episode:
-            report = queue_episode_for_clipping(session, episode, clip_source=ClipSource.MANUAL)
+            report = _queue_episode(session, episode, clip_source=ClipSource.MANUAL)
             reports.append(report.id)
     return {"message": f"Clipping queued for {len(reports)} episodes", "report_ids": reports}
 
@@ -198,7 +217,7 @@ def clip_all_episodes(podcast_id: str, session: Session = Depends(get_session)):
 
     reports = []
     for episode in episodes:
-        report = queue_episode_for_clipping(session, episode, clip_source=ClipSource.MANUAL)
+        report = _queue_episode(session, episode, clip_source=ClipSource.MANUAL)
         reports.append(report.id)
 
     return {"message": f"Clipping queued for {len(reports)} episodes", "report_ids": reports}

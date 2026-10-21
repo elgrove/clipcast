@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { page } from '$app/stores';
+	import { untrack } from 'svelte';
 	import { goto } from '$app/navigation';
 	import {
 		getPodcast,
@@ -12,14 +13,13 @@
 		clipEpisode,
 		clipAllEpisodes,
 		batchClipEpisodes,
-		getEpisodeStatus
+		getEpisodeStatuses
 	} from '$lib/api';
 	import { toasts } from '$lib/stores';
 	import { formatDurationShort } from '$lib/utils';
-	import type { PodcastShow, PodcastEpisode, ClippingReport } from '$lib/types';
+	import type { PodcastShow, PodcastEpisode } from '$lib/types';
 
-	let podcastId = $state('');
-	page.subscribe((p) => (podcastId = p.params.id ?? ''));
+	const podcastId = $derived($page.params.id ?? '');
 
 	let podcast: PodcastShow | null = $state(null);
 	let episodes: PodcastEpisode[] = $state([]);
@@ -96,7 +96,6 @@
 	let clippingIds: Set<string> = $state(new Set());
 	let cleaningIds: Set<string> = $state(new Set());
 	let clippingAll = $state(false);
-	let episodeStatuses: Map<string, ClippingReport> = $state(new Map());
 	let openEpisodeMenu: string | null = $state(null);
 	let mobileSelectMode = $state(false);
 	let longPressTimer: ReturnType<typeof setTimeout> | undefined;
@@ -131,8 +130,9 @@
 		}
 	}
 
-	let pollingInterval: ReturnType<typeof setInterval> | undefined;
-	let syncPollingInterval: ReturnType<typeof setInterval> | undefined;
+	let pollingInterval: ReturnType<typeof setTimeout> | undefined;
+	let syncPending = false;
+	let pollGeneration = 0;
 
 	const ACTIVE_STATUSES = ['queued', 'downloading', 'transcribing', 'analysing', 'refining', 'editing'];
 
@@ -190,7 +190,10 @@
 
 	async function loadPodcast() {
 		try {
-			podcast = await getPodcast(podcastId);
+			const id = podcastId;
+			const result = await getPodcast(id);
+			if (id !== podcastId) return;
+			podcast = result;
 			initSettingsFields();
 		} catch (e: any) {
 			toasts.addToast('error', e.message || 'Failed to load podcast');
@@ -200,10 +203,16 @@
 	async function loadEpisodes() {
 		loadingEpisodes = true;
 		try {
-			const data = await getEpisodes(podcastId, currentPage, perPage, statusFilter);
+			const id = podcastId;
+			const requestedPage = currentPage;
+			const requestedSize = perPage;
+			const filter = statusFilter;
+			const data = await getEpisodes(id, requestedPage, requestedSize, filter);
+			if (id !== podcastId || requestedPage !== currentPage || requestedSize !== perPage || filter !== statusFilter) return;
 			episodes = data.episodes;
 			totalEpisodes = data.total;
 			totalPages = data.pages;
+			if (episodes.some((ep) => ep.clipping_status && ACTIVE_STATUSES.includes(ep.clipping_status))) startPolling();
 		} catch (e: any) {
 			toasts.addToast('error', e.message || 'Failed to load episodes');
 		} finally {
@@ -318,8 +327,9 @@
 		downloadingIds = new Set([...downloadingIds, episodeId]);
 		try {
 			await downloadEpisode(episodeId);
-			toasts.addToast('success', 'Download complete');
+			toasts.addToast('success', 'Download queued');
 			await loadEpisodes();
+			startPolling();
 		} catch (e: any) {
 			toasts.addToast('error', e.message || 'Download failed');
 		} finally {
@@ -429,74 +439,63 @@
 		loadEpisodes();
 	}
 
-	async function pollStatuses() {
-		const activeEpisodes = episodes.filter(
-			(ep) => ep.clipping_status && ACTIVE_STATUSES.includes(ep.clipping_status)
-		);
-
-		if (activeEpisodes.length === 0) {
-			stopPolling();
-			return;
-		}
-
-		let needsReload = false;
-		for (const ep of activeEpisodes) {
-			try {
-				const status = await getEpisodeStatus(ep.id);
-				if (status) {
-					const prev = episodeStatuses.get(ep.id);
-					if (!prev || prev.status !== status.status) {
-						episodeStatuses = new Map(episodeStatuses).set(ep.id, status);
-						needsReload = true;
-					}
+	async function pollStatuses(generation: number) {
+		try {
+			if (document.hidden) return;
+			if (syncPending) {
+				await Promise.all([loadPodcast(), loadEpisodes()]);
+				if (generation !== pollGeneration) return;
+				syncPending = !podcast?.initial_sync_completed;
+			} else {
+				const active = episodes.filter((ep) => ep.clipping_status && ACTIVE_STATUSES.includes(ep.clipping_status));
+				if (!active.length) return;
+				const statuses = await getEpisodeStatuses(active.map((ep) => ep.id));
+				if (generation !== pollGeneration) return;
+				if (active.some((ep) => statuses[ep.id]?.status !== ep.clipping_status)) {
+					await loadEpisodes();
 				}
-			} catch {
-				// ignore polling errors
 			}
-		}
-
-		if (needsReload) {
-			await loadEpisodes();
+		} catch {
+			// Retry on the next scheduled poll.
+		} finally {
+			if (generation === pollGeneration) {
+				pollingInterval = undefined;
+				if (syncPending || episodes.some((ep) => ep.clipping_status && ACTIVE_STATUSES.includes(ep.clipping_status))) {
+					startPolling();
+				}
+			}
 		}
 	}
 
 	function startPolling() {
 		if (pollingInterval) return;
-		pollingInterval = setInterval(pollStatuses, 3000);
+		const generation = pollGeneration;
+		pollingInterval = setTimeout(() => pollStatuses(generation), 3000);
 	}
 
 	function stopPolling() {
-		if (pollingInterval) {
-			clearInterval(pollingInterval);
-			pollingInterval = undefined;
-		}
+		pollGeneration += 1;
+		clearTimeout(pollingInterval);
+		pollingInterval = undefined;
 	}
 
 	function startSyncPolling() {
-		if (syncPollingInterval) return;
-		syncPollingInterval = setInterval(async () => {
-			await loadPodcast();
-			await loadEpisodes();
-			if (podcast?.initial_sync_completed && episodes.length > 0) {
-				clearInterval(syncPollingInterval);
-				syncPollingInterval = undefined;
-			}
-		}, 3000);
+		syncPending = true;
+		startPolling();
 	}
 
 	function stopSyncPolling() {
-		if (syncPollingInterval) {
-			clearInterval(syncPollingInterval);
-			syncPollingInterval = undefined;
-		}
+		syncPending = false;
 	}
 
 	$effect(() => {
 		if (!podcastId) return;
 		loading = true;
-		Promise.all([loadPodcast(), loadEpisodes()]).then(() => {
+		const generation = pollGeneration;
+		untrack(() => Promise.all([loadPodcast(), loadEpisodes()])).then(() => {
+			if (generation !== pollGeneration) return;
 			loading = false;
-			if (!podcast?.initial_sync_completed || episodes.length === 0) {
+			if (!podcast?.initial_sync_completed) {
 				startSyncPolling();
 			}
 			const hasActive = episodes.some(
@@ -805,7 +804,7 @@
 													{episode.ad_break_count} break{episode.ad_break_count !== 1 ? 's' : ''} · {formatDurationShort(episode.ad_break_seconds)} cut
 												</span>
 											{/if}
-											{#if episode.clipping_status && episode.clipping_status !== 'completed'}
+											{#if episode.clipping_status && !['completed', 'failed'].includes(episode.clipping_status)}
 												<span class="inline-block rounded-full px-2 py-0.5 text-xs font-medium {statusBadgeClass(episode.clipping_status)}">
 													{episode.clipping_status}
 												</span>
@@ -818,7 +817,7 @@
 												onclick={() => handleClip(episode.id)}
 												disabled={clippingIds.has(episode.id) ||
 													(episode.clipping_status !== null &&
-														episode.clipping_status !== 'completed')}
+														!['completed', 'failed'].includes(episode.clipping_status))}
 												class="rounded-lg p-1.5 text-zinc-500 transition-colors hover:bg-zinc-100 hover:text-zinc-700 disabled:opacity-50 dark:text-zinc-400 dark:hover:bg-zinc-800 dark:hover:text-zinc-200"
 											>
 												{#if clippingIds.has(episode.id)}
@@ -975,7 +974,7 @@
 											{episode.ad_break_count} break{episode.ad_break_count !== 1 ? 's' : ''} · {formatDurationShort(episode.ad_break_seconds)} cut
 										</span>
 									{/if}
-									{#if episode.clipping_status && episode.clipping_status !== 'completed'}
+									{#if episode.clipping_status && !['completed', 'failed'].includes(episode.clipping_status)}
 										<span class="inline-block rounded-full px-2 py-0.5 text-xs font-medium {statusBadgeClass(episode.clipping_status)}">
 											{episode.clipping_status}
 										</span>
@@ -989,7 +988,7 @@
 										onclick={() => handleClip(episode.id)}
 										disabled={clippingIds.has(episode.id) ||
 											(episode.clipping_status !== null &&
-												episode.clipping_status !== 'completed')}
+												!['completed', 'failed'].includes(episode.clipping_status))}
 										class="flex h-9 w-9 items-center justify-center rounded-lg text-zinc-500 active:bg-zinc-100 disabled:opacity-50 dark:text-zinc-400 dark:active:bg-zinc-800"
 									>
 										{#if clippingIds.has(episode.id)}

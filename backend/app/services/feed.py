@@ -1,12 +1,37 @@
 import logging
-from datetime import timezone
+from collections import OrderedDict
+from datetime import UTC
+from threading import Lock
+from time import monotonic
 
 from feedgen.feed import FeedGenerator
+from sqlalchemy.orm import defer
 from sqlmodel import Session, select
 
 from app.models import ClippingReport, PodcastEpisode, PodcastShow
 
 logger = logging.getLogger(__name__)
+
+
+FEED_CACHE_SECONDS = 30
+_feed_cache: OrderedDict[tuple, tuple[float, bytes]] = OrderedDict()
+_feed_cache_lock = Lock()
+
+
+def cached_podcast_feed(session: Session, podcast: PodcastShow, base_url: str) -> bytes:
+    key = (str(session.get_bind().url), podcast.id, base_url)
+    with _feed_cache_lock:
+        cached = _feed_cache.get(key)
+        if cached and monotonic() - cached[0] < FEED_CACHE_SECONDS:
+            _feed_cache.move_to_end(key)
+            return cached[1]
+    content = generate_podcast_feed(session, podcast, base_url)
+    with _feed_cache_lock:
+        _feed_cache[key] = (monotonic(), content)
+        _feed_cache.move_to_end(key)
+        while len(_feed_cache) > 128:
+            _feed_cache.popitem(last=False)
+    return content
 
 
 def generate_podcast_feed(session: Session, podcast: PodcastShow, base_url: str) -> bytes:
@@ -28,14 +53,18 @@ def generate_podcast_feed(session: Session, podcast: PodcastShow, base_url: str)
 
     clipped_episodes = session.exec(
         select(PodcastEpisode)
-        .join(ClippingReport, ClippingReport.episode_id == PodcastEpisode.id)
+        .options(defer(PodcastEpisode.transcription_json), defer(PodcastEpisode.ad_breaks_json))
         .where(
             PodcastEpisode.podcast_id == podcast.id,
-            ClippingReport.edited_at.isnot(None),
+            select(ClippingReport.id)
+            .where(
+                ClippingReport.episode_id == PodcastEpisode.id,
+                ClippingReport.edited_at.isnot(None),
+            )
+            .exists(),
             PodcastEpisode.cleaned_at.is_(None),
         )
         .order_by(PodcastEpisode.published_at.desc())
-        .distinct()
     ).all()
 
     for episode in clipped_episodes:
@@ -48,7 +77,11 @@ def generate_podcast_feed(session: Session, podcast: PodcastShow, base_url: str)
         fe.description(episode.description or "")
 
         if episode.published_at:
-            pub = episode.published_at.replace(tzinfo=timezone.utc) if episode.published_at.tzinfo is None else episode.published_at
+            pub = (
+                episode.published_at.replace(tzinfo=UTC)
+                if episode.published_at.tzinfo is None
+                else episode.published_at
+            )
             fe.published(pub)
             fe.updated(pub)
 

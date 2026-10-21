@@ -9,6 +9,8 @@ import json
 import logging
 import re
 import subprocess
+import tempfile
+from collections.abc import Iterator
 from pathlib import Path
 
 import numpy as np
@@ -173,3 +175,44 @@ def keep_ranges(source: Path, ranges: list[tuple[int, int]], dest: Path) -> None
         args += ["-b:a", str(bitrate)]
     args.append(str(dest))
     _run(args)
+
+
+def iter_mono_blocks(path: Path, sample_rate: int, block_seconds: int = 30) -> Iterator[np.ndarray]:
+    """Decode once and yield bounded float32 blocks. Close ffmpeg on early exit."""
+    with tempfile.TemporaryFile() as errors:
+        process = subprocess.Popen(
+            [
+                "ffmpeg",
+                "-nostdin",
+                "-v",
+                "error",
+                "-i",
+                str(path),
+                "-f",
+                "s16le",
+                "-ac",
+                "1",
+                "-ar",
+                str(sample_rate),
+                "-",
+            ],
+            stdout=subprocess.PIPE,
+            stderr=errors,
+        )
+        try:
+            while data := process.stdout.read(sample_rate * block_seconds * 2):
+                yield np.frombuffer(data, dtype=np.int16).astype(np.float32) / 32768.0
+            if process.wait() != 0:
+                errors.seek(0)
+                raise RuntimeError(
+                    f"ffmpeg failed: {errors.read().decode('utf-8', 'replace')[-1000:]}"
+                )
+        finally:
+            process.stdout.close()
+            if process.poll() is None:
+                process.terminate()
+                try:
+                    process.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    process.kill()
+                    process.wait()
